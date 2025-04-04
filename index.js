@@ -3,10 +3,10 @@ const ffmpeg = require('fluent-ffmpeg');
 const fs = require('fs');
 const fetch = require('node-fetch');
 const { v4: uuidv4 } = require('uuid');
-const cors = require('cors'); // ✅ חדש
+const cors = require('cors'); // שימוש ב־CORS
 
 const app = express();
-app.use(cors()); // ✅ חדש
+app.use(cors()); // הפעלת CORS
 app.use(express.json());
 
 app.post('/generate-clip', async (req, res) => {
@@ -28,14 +28,18 @@ app.post('/generate-clip', async (req, res) => {
       .setStartTime(timestamp)
       .setDuration(duration)
       .output(outputPath)
+      .on('start', (commandLine) => {
+        console.log('FFmpeg command:', commandLine);
+      })
       .on('end', () => {
         res.download(outputPath, `clip_${videoId}.mp4`, () => {
           fs.unlinkSync(inputPath);
           fs.unlinkSync(outputPath);
         });
       })
-      .on('error', (err) => {
-        console.error(err);
+      .on('error', (err, stdout, stderr) => {
+        console.error('FFmpeg error:', err.message);
+        console.error('FFmpeg stderr:', stderr);
         res.status(500).send('FFmpeg failed');
       })
       .run();
