@@ -4,7 +4,7 @@ const fs = require('fs');
 const fetch = require('node-fetch');
 const { v4: uuidv4 } = require('uuid');
 const cors = require('cors');
-const { uploadFileToDrive } = require('./driveUploader'); // 👈 חדש
+const uploadToDrive = require('./driveUploader');  // 👈 עדכון כאן
 
 const app = express();
 app.use(cors());
@@ -26,13 +26,13 @@ app.post('/generate-clip', async (req, res) => {
     fs.writeFileSync(inputPath, buffer);
 
     ffmpeg(inputPath)
-      .setStartTime(Math.max(0, timestamp - 5)) // 👈 פחות 5 שניות
-      .setDuration(6) // 👈 אורך קליפ 6 שניות
+      .setStartTime(Math.max(0, timestamp - 5))  // 👈 פחות 5 שניות
+      .setDuration(6)  // 👈 אורך קליפ 6 שניות
       .output(outputPath)
       .on('end', async () => {
         try {
-          const folderId = '1onJ7niZb1PE1UBvDu2yBuiW1ZCzADv2C'; // 👈 קליפים
-          const driveLink = await uploadFileToDrive(outputPath, `clip_${videoId}.mp4`, folderId);
+          const folderId = '1onJ7niZb1PE1UBvDu2yBuiW1ZCzADv2C';  // 👈 קליפים
+          const driveLink = await uploadToDrive(outputPath, `clip_${videoId}.mp4`, folderId);
 
           fs.unlinkSync(inputPath);
           fs.unlinkSync(outputPath);
