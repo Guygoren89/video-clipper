@@ -6,7 +6,7 @@
     "express": "^4.17.1",
     "fluent-ffmpeg": "^2.1.2",
     "node-fetch": "^2.6.1",
-    "uuid": "^9.0.0"
+    "uuid": "^9.0.0",
     "cors": "^2.8.5"
   }
 }
