@@ -1,11 +1,12 @@
-
 const express = require('express');
 const ffmpeg = require('fluent-ffmpeg');
 const fs = require('fs');
 const fetch = require('node-fetch');
 const { v4: uuidv4 } = require('uuid');
+const cors = require('cors'); // ✅ חדש
 
 const app = express();
+app.use(cors()); // ✅ חדש
 app.use(express.json());
 
 app.post('/generate-clip', async (req, res) => {
