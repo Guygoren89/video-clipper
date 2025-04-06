@@ -6,6 +6,18 @@ const { v4: uuidv4 } = require('uuid');
 const cors = require('cors');
 const uploadToDrive = require('./driveUploader');  // 👈 עדכון כאן
 
+// ✅ קוד בדיקה לקריאת קובץ JSON של Google
+const credentialsPath = process.env.GOOGLE_APPLICATION_CREDENTIALS;
+
+try {
+  const raw = fs.readFileSync(credentialsPath, 'utf8');
+  console.log("✅ JSON credentials file found and readable");
+  const parsed = JSON.parse(raw);
+  console.log("✅ Parsed successfully. client_email:", parsed.client_email);
+} catch (err) {
+  console.error("❌ Failed to read or parse credentials JSON file:", err);
+}
+
 const app = express();
 app.use(cors());
 app.use(express.json());
@@ -26,12 +38,12 @@ app.post('/generate-clip', async (req, res) => {
     fs.writeFileSync(inputPath, buffer);
 
     ffmpeg(inputPath)
-      .setStartTime(Math.max(0, timestamp - 5))  // 👈 פחות 5 שניות
-      .setDuration(6)  // 👈 אורך קליפ 6 שניות
+      .setStartTime(Math.max(0, timestamp - 5))
+      .setDuration(6)
       .output(outputPath)
       .on('end', async () => {
         try {
-          const folderId = '1onJ7niZb1PE1UBvDu2yBuiW1ZCzADv2C';  // 👈 קליפים
+          const folderId = '1onJ7niZb1PE1UBvDu2yBuiW1ZCzADv2C';
           const driveLink = await uploadToDrive(outputPath, `clip_${videoId}.mp4`, folderId);
 
           fs.unlinkSync(inputPath);
