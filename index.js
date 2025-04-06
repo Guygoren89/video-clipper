@@ -4,6 +4,7 @@ const fs = require('fs');
 const fetch = require('node-fetch');
 const { v4: uuidv4 } = require('uuid');
 const cors = require('cors');
+const path = require('path');
 const uploadToDrive = require('./driveUploader');
 
 const credentialsPath = process.env.GOOGLE_APPLICATION_CREDENTIALS;
@@ -69,7 +70,6 @@ app.post('/generate-clip', async (req, res) => {
           };
 
           fs.writeFileSync(metadataPath, JSON.stringify(metadata));
-
           await uploadToDrive(metadataPath, `clip_${videoId}.meta.json`, folderId);
 
           fs.unlinkSync(inputPath);
@@ -113,17 +113,48 @@ app.get('/clips', async (req, res) => {
       orderBy: 'createdTime desc',
     });
 
-    const clips = response.data.files
-      .filter(file => file.name.endsWith('.mp4'))
-      .map(file => ({
-        external_id: file.id,
-        name: file.name,
-        view_url: `https://drive.google.com/file/d/${file.id}/view?usp=sharing`,
-        download_url: `https://drive.google.com/uc?id=${file.id}&export=download`,
-        thumbnail_url: `https://drive.google.com/thumbnail?id=${file.id}`,
-        duration: 6,
-        created_date: file.createdTime,
-      }));
+    const files = response.data.files;
+
+    const clips = await Promise.all(
+      files
+        .filter(file => file.name.endsWith('.mp4'))
+        .map(async (file) => {
+          const baseName = path.basename(file.name, '.mp4');
+          const metadataFileName = `${baseName}.meta.json`;
+          const metadataFile = files.find(f => f.name === metadataFileName);
+
+          let metadata = {};
+
+          if (metadataFile) {
+            try {
+              const metadataResponse = await drive.files.get({
+                fileId: metadataFile.id,
+                alt: 'media',
+              }, { responseType: 'stream' });
+
+              const chunks = [];
+              for await (const chunk of metadataResponse.data) {
+                chunks.push(chunk);
+              }
+              const buffer = Buffer.concat(chunks);
+              metadata = JSON.parse(buffer.toString());
+            } catch (err) {
+              console.error(`Failed to read metadata for ${file.name}:`, err);
+            }
+          }
+
+          return {
+            external_id: file.id,
+            name: file.name,
+            view_url: `https://drive.google.com/file/d/${file.id}/view?usp=sharing`,
+            download_url: `https://drive.google.com/uc?id=${file.id}&export=download`,
+            thumbnail_url: `https://drive.google.com/thumbnail?id=${file.id}`,
+            duration: 6,
+            created_date: file.createdTime,
+            ...metadata
+          };
+        })
+    );
 
     res.json({ clips });
   } catch (err) {
