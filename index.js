@@ -19,15 +19,23 @@ try {
 
 const app = express();
 
-// ✅ CORS הגדרה שמאפשרת גישה חיצונית
 app.use(cors({
-  origin: '*', // אפשר לשנות לכתובת ספציפית בעתיד
+  origin: '*',
 }));
 
 app.use(express.json());
 
 app.post('/generate-clip', async (req, res) => {
-  const { videoUrl, timestamp, duration } = req.body;
+  const {
+    videoUrl,
+    timestamp,
+    duration,
+    player_id,
+    player_name,
+    action_type,
+    match_id
+  } = req.body;
+
   if (!videoUrl || timestamp == null || !duration) {
     return res.status(400).json({ error: 'Missing parameters' });
   }
@@ -35,6 +43,7 @@ app.post('/generate-clip', async (req, res) => {
   const videoId = uuidv4();
   const inputPath = `/tmp/input_${videoId}.mp4`;
   const outputPath = `/tmp/clip_${videoId}.mp4`;
+  const metadataPath = `/tmp/clip_${videoId}.meta.json`;
 
   try {
     const response = await fetch(videoUrl);
@@ -48,12 +57,26 @@ app.post('/generate-clip', async (req, res) => {
       .on('end', async () => {
         try {
           const folderId = '1onJ7niZb1PE1UBvDu2yBuiW1ZCzADv2C';
-          const driveLink = await uploadToDrive(outputPath, `clip_${videoId}.mp4`, folderId);
+          const clipFileName = `clip_${videoId}.mp4`;
+
+          const driveLink = await uploadToDrive(outputPath, clipFileName, folderId);
+
+          const metadata = {
+            player_id,
+            player_name,
+            action_type,
+            match_id
+          };
+
+          fs.writeFileSync(metadataPath, JSON.stringify(metadata));
+
+          await uploadToDrive(metadataPath, `clip_${videoId}.meta.json`, folderId);
 
           fs.unlinkSync(inputPath);
           fs.unlinkSync(outputPath);
+          fs.unlinkSync(metadataPath);
 
-          res.json({ message: 'Clip uploaded to Google Drive', driveLink });
+          res.json({ message: 'Clip and metadata uploaded to Google Drive', driveLink });
         } catch (uploadErr) {
           console.error('Upload failed:', uploadErr);
           res.status(500).send('Upload to Google Drive failed');
@@ -90,15 +113,17 @@ app.get('/clips', async (req, res) => {
       orderBy: 'createdTime desc',
     });
 
-    const clips = response.data.files.map(file => ({
-      external_id: file.id,
-      name: file.name,
-      view_url: `https://drive.google.com/file/d/${file.id}/view?usp=sharing`,
-      download_url: `https://drive.google.com/uc?id=${file.id}&export=download`,
-      thumbnail_url: `https://drive.google.com/thumbnail?id=${file.id}`,
-      duration: 6,
-      created_date: file.createdTime,
-    }));
+    const clips = response.data.files
+      .filter(file => file.name.endsWith('.mp4'))
+      .map(file => ({
+        external_id: file.id,
+        name: file.name,
+        view_url: `https://drive.google.com/file/d/${file.id}/view?usp=sharing`,
+        download_url: `https://drive.google.com/uc?id=${file.id}&export=download`,
+        thumbnail_url: `https://drive.google.com/thumbnail?id=${file.id}`,
+        duration: 6,
+        created_date: file.createdTime,
+      }));
 
     res.json({ clips });
   } catch (err) {
