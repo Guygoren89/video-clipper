@@ -4,9 +4,8 @@ const fs = require('fs');
 const fetch = require('node-fetch');
 const { v4: uuidv4 } = require('uuid');
 const cors = require('cors');
-const uploadToDrive = require('./driveUploader');  // 👈 עדכון כאן
+const uploadToDrive = require('./driveUploader');
 
-// ✅ קוד בדיקה לקריאת קובץ JSON של Google
 const credentialsPath = process.env.GOOGLE_APPLICATION_CREDENTIALS;
 
 try {
@@ -63,6 +62,43 @@ app.post('/generate-clip', async (req, res) => {
   } catch (e) {
     console.error(e);
     res.status(500).send('Video download or processing failed');
+  }
+});
+
+app.get('/clips', async (req, res) => {
+  try {
+    const { google } = require('googleapis');
+    const { GoogleAuth } = require('google-auth-library');
+
+    const auth = new GoogleAuth({
+      keyFile: process.env.GOOGLE_APPLICATION_CREDENTIALS,
+      scopes: ['https://www.googleapis.com/auth/drive.readonly'],
+    });
+
+    const authClient = await auth.getClient();
+    const drive = google.drive({ version: 'v3', auth: authClient });
+
+    const folderId = '1onJ7niZb1PE1UBvDu2yBuiW1ZCzADv2C';
+    const response = await drive.files.list({
+      q: `'${folderId}' in parents and trashed = false`,
+      fields: 'files(id, name, createdTime)',
+      orderBy: 'createdTime desc',
+    });
+
+    const clips = response.data.files.map(file => ({
+      external_id: file.id,
+      name: file.name,
+      view_url: `https://drive.google.com/file/d/${file.id}/view?usp=sharing`,
+      download_url: `https://drive.google.com/uc?id=${file.id}&export=download`,
+      thumbnail_url: `https://drive.google.com/thumbnail?id=${file.id}`,
+      duration: 6,
+      created_date: file.createdTime,
+    }));
+
+    res.json({ clips });
+  } catch (err) {
+    console.error('❌ Failed to fetch clips:', err);
+    res.status(500).send('Failed to fetch clips');
   }
 });
 
