@@ -5,6 +5,7 @@ const fetch = require('node-fetch');
 const { v4: uuidv4 } = require('uuid');
 const cors = require('cors');
 const path = require('path');
+const multer = require('multer');
 const uploadToDrive = require('./driveUploader');
 
 const credentialsPath = process.env.GOOGLE_APPLICATION_CREDENTIALS;
@@ -19,13 +20,37 @@ try {
 }
 
 const app = express();
+const upload = multer({ dest: '/tmp' });
 
-app.use(cors({
-  origin: '*',
-}));
-
+app.use(cors({ origin: '*' }));
 app.use(express.json());
 
+// ✅ API חדש - העלאת סרטון מלא ל-Drive
+app.post('/upload-full-game', upload.single('file'), async (req, res) => {
+  try {
+    const file = req.file;
+    const match_id = req.body.match_id || uuidv4();
+    if (!file) return res.status(400).send('No file uploaded');
+
+    const fileName = `full_game_${match_id}.mp4`;
+    const folderId = '1vu6elArxj6YKLZePXjoqp_UFrDiI5ZOC';
+    const driveResponse = await uploadToDrive(file.path, fileName, folderId);
+
+    fs.unlinkSync(file.path);
+
+    res.json({
+      message: 'Full game uploaded',
+      file_id: driveResponse.id,
+      view_url: driveResponse.webViewLink,
+      download_url: driveResponse.webContentLink
+    });
+  } catch (err) {
+    console.error('Upload failed:', err);
+    res.status(500).send('Upload failed');
+  }
+});
+
+// ✅ API קיים - יצירת קליפים עם metadata
 app.post('/generate-clip', async (req, res) => {
   const {
     videoUrl,
@@ -93,6 +118,7 @@ app.post('/generate-clip', async (req, res) => {
   }
 });
 
+// ✅ שליפה של קליפים קיימים
 app.get('/clips', async (req, res) => {
   try {
     const { google } = require('googleapis');
@@ -116,44 +142,42 @@ app.get('/clips', async (req, res) => {
     const files = response.data.files;
 
     const clips = await Promise.all(
-      files
-        .filter(file => file.name.endsWith('.mp4'))
-        .map(async (file) => {
-          const baseName = path.basename(file.name, '.mp4');
-          const metadataFileName = `${baseName}.meta.json`;
-          const metadataFile = files.find(f => f.name === metadataFileName);
+      files.filter(file => file.name.endsWith('.mp4')).map(async (file) => {
+        const baseName = path.basename(file.name, '.mp4');
+        const metadataFileName = `${baseName}.meta.json`;
+        const metadataFile = files.find(f => f.name === metadataFileName);
 
-          let metadata = {};
+        let metadata = {};
 
-          if (metadataFile) {
-            try {
-              const metadataResponse = await drive.files.get({
-                fileId: metadataFile.id,
-                alt: 'media',
-              }, { responseType: 'stream' });
+        if (metadataFile) {
+          try {
+            const metadataResponse = await drive.files.get({
+              fileId: metadataFile.id,
+              alt: 'media',
+            }, { responseType: 'stream' });
 
-              const chunks = [];
-              for await (const chunk of metadataResponse.data) {
-                chunks.push(chunk);
-              }
-              const buffer = Buffer.concat(chunks);
-              metadata = JSON.parse(buffer.toString());
-            } catch (err) {
-              console.error(`Failed to read metadata for ${file.name}:`, err);
+            const chunks = [];
+            for await (const chunk of metadataResponse.data) {
+              chunks.push(chunk);
             }
+            const buffer = Buffer.concat(chunks);
+            metadata = JSON.parse(buffer.toString());
+          } catch (err) {
+            console.error(`Failed to read metadata for ${file.name}:`, err);
           }
+        }
 
-          return {
-            external_id: file.id,
-            name: file.name,
-            view_url: `https://drive.google.com/file/d/${file.id}/view?usp=sharing`,
-            download_url: `https://drive.google.com/uc?id=${file.id}&export=download`,
-            thumbnail_url: `https://drive.google.com/thumbnail?id=${file.id}`,
-            duration: 6,
-            created_date: file.createdTime,
-            ...metadata
-          };
-        })
+        return {
+          external_id: file.id,
+          name: file.name,
+          view_url: `https://drive.google.com/file/d/${file.id}/view?usp=sharing`,
+          download_url: `https://drive.google.com/uc?id=${file.id}&export=download`,
+          thumbnail_url: `https://drive.google.com/thumbnail?id=${file.id}`,
+          duration: 6,
+          created_date: file.createdTime,
+          ...metadata
+        };
+      })
     );
 
     res.json({ clips });
