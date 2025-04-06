@@ -25,7 +25,7 @@ const upload = multer({ dest: '/tmp' });
 app.use(cors({ origin: '*' }));
 app.use(express.json());
 
-// ✅ API חדש - העלאת סרטון מלא ל-Drive
+// ✅ API להעלאת משחקים מלאים
 app.post('/upload-full-game', upload.single('file'), async (req, res) => {
   try {
     const file = req.file;
@@ -50,7 +50,7 @@ app.post('/upload-full-game', upload.single('file'), async (req, res) => {
   }
 });
 
-// ✅ API קיים - יצירת קליפים עם metadata
+// ✅ API ליצירת קליפ מתוך משחק
 app.post('/generate-clip', async (req, res) => {
   const {
     videoUrl,
@@ -118,7 +118,7 @@ app.post('/generate-clip', async (req, res) => {
   }
 });
 
-// ✅ שליפה של קליפים קיימים
+// ✅ API לשליפת קליפים מהדרייב
 app.get('/clips', async (req, res) => {
   try {
     const { google } = require('googleapis');
