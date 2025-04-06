@@ -1,36 +1,36 @@
 const fs = require('fs');
+const path = require('path');
+const mime = require('mime-types');
 const { google } = require('googleapis');
-const mime = require('mime-types');  // להוסיף אם רוצים קביעת mimeType אוטומטית
+const { GoogleAuth } = require('google-auth-library'); // 💡 תיקון קריטי כאן
 
 async function uploadToDrive(filePath, fileName, folderId) {
-  const auth = new google.auth.GoogleAuth({
+  const auth = new GoogleAuth({
+    keyFile: process.env.GOOGLE_APPLICATION_CREDENTIALS,
     scopes: ['https://www.googleapis.com/auth/drive.file'],
   });
 
-  const drive = google.drive({ version: 'v3', auth });
+  const authClient = await auth.getClient();
+  const drive = google.drive({ version: 'v3', auth: authClient });
 
-  // הגדרת המידע על הקובץ
   const fileMetadata = {
     name: fileName,
-    parents: [folderId],  // מזהה התיקיה ב-Google Drive
+    parents: [folderId],
   };
 
-  // קביעת mimeType אוטומטית
-  const mimeType = mime.lookup(filePath) || 'application/octet-stream';  // אם לא נמצא mimeType, ישתמש ב-default
+  const mimeType = mime.lookup(filePath) || 'application/octet-stream';
 
   const media = {
-    mimeType: mimeType,  // כאן מותאם mimeType דינאמית
+    mimeType: mimeType,
     body: fs.createReadStream(filePath),
   };
 
-  // העלאת הקובץ ל-Google Drive
   const response = await drive.files.create({
     requestBody: fileMetadata,
     media: media,
-    fields: 'id, webViewLink, webContentLink',  // החזרת המידע החשוב: מזהה הקובץ, לינק לצפייה בלייב, לינק להורדה
+    fields: 'id, webViewLink, webContentLink',
   });
 
-  // מחזירים את התשובה, כולל את הלינק לצפייה וללינק להורדה
   return response.data;
 }
 
