@@ -2,7 +2,7 @@ const fs = require('fs');
 const path = require('path');
 const mime = require('mime-types');
 const { google } = require('googleapis');
-const { GoogleAuth } = require('google-auth-library'); // 💡 תיקון קריטי כאן
+const { GoogleAuth } = require('google-auth-library'); // ✅ ייבוא נכון
 
 async function uploadToDrive(filePath, fileName, folderId) {
   const auth = new GoogleAuth({
