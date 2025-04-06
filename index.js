@@ -18,7 +18,12 @@ try {
 }
 
 const app = express();
-app.use(cors());
+
+// ✅ CORS הגדרה שמאפשרת גישה חיצונית
+app.use(cors({
+  origin: '*', // אפשר לשנות לכתובת ספציפית בעתיד
+}));
+
 app.use(express.json());
 
 app.post('/generate-clip', async (req, res) => {
