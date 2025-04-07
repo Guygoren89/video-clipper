@@ -6,6 +6,7 @@ const { v4: uuidv4 } = require('uuid');
 const cors = require('cors');
 const path = require('path');
 const multer = require('multer');
+const mime = require('mime-types');
 const uploadToDrive = require('./driveUploader');
 const { google } = require('googleapis');
 const { GoogleAuth } = require('google-auth-library');
@@ -14,11 +15,10 @@ const credentialsPath = process.env.GOOGLE_APPLICATION_CREDENTIALS;
 
 try {
   const raw = fs.readFileSync(credentialsPath, 'utf8');
-  console.log("✅ JSON credentials file found and readable");
   const parsed = JSON.parse(raw);
-  console.log("✅ Parsed successfully. client_email:", parsed.client_email);
+  console.log("✅ JSON credentials loaded. client_email:", parsed.client_email);
 } catch (err) {
-  console.error("❌ Failed to read or parse credentials JSON file:", err);
+  console.error("❌ Failed to load credentials:", err);
 }
 
 const app = express();
@@ -34,11 +34,13 @@ app.post('/upload-full-game', upload.single('file'), async (req, res) => {
     const match_id = req.body.match_id || uuidv4();
     if (!file) return res.status(400).send('No file uploaded');
 
-    const fileName = `full_game_${match_id}.mp4`;
+    const extension = mime.extension(mime.lookup(file.path)) || 'mp4';
+    const fileName = `full_game_${match_id}.${extension}`;
     const folderId = '1vu6elArxj6YKLZePXjoqp_UFrDiI5ZOC';
+
     const driveResponse = await uploadToDrive(file.path, fileName, folderId);
 
-    fs.unlinkSync(file.path);
+    try { fs.unlinkSync(file.path); } catch (e) { console.warn('⚠️ Failed to delete temp file:', e.message); }
 
     res.json({
       message: 'Full game uploaded',
@@ -54,15 +56,7 @@ app.post('/upload-full-game', upload.single('file'), async (req, res) => {
 
 // ✅ API ליצירת קליפ מתוך משחק
 app.post('/generate-clip', async (req, res) => {
-  const {
-    videoUrl,
-    timestamp,
-    duration,
-    player_id,
-    player_name,
-    action_type,
-    match_id
-  } = req.body;
+  const { videoUrl, timestamp, duration, player_id, player_name, action_type, match_id } = req.body;
 
   if (!videoUrl || timestamp == null || !duration) {
     return res.status(400).json({ error: 'Missing parameters' });
@@ -89,19 +83,13 @@ app.post('/generate-clip', async (req, res) => {
 
           const driveLink = await uploadToDrive(outputPath, clipFileName, folderId);
 
-          const metadata = {
-            player_id,
-            player_name,
-            action_type,
-            match_id
-          };
-
+          const metadata = { player_id, player_name, action_type, match_id };
           fs.writeFileSync(metadataPath, JSON.stringify(metadata));
           await uploadToDrive(metadataPath, `clip_${videoId}.meta.json`, folderId);
 
-          fs.unlinkSync(inputPath);
-          fs.unlinkSync(outputPath);
-          fs.unlinkSync(metadataPath);
+          try { fs.unlinkSync(inputPath); } catch (e) { console.warn('⚠️ Failed to delete input:', e.message); }
+          try { fs.unlinkSync(outputPath); } catch (e) { console.warn('⚠️ Failed to delete output:', e.message); }
+          try { fs.unlinkSync(metadataPath); } catch (e) { console.warn('⚠️ Failed to delete metadata:', e.message); }
 
           res.json({ message: 'Clip and metadata uploaded to Google Drive', driveLink });
         } catch (uploadErr) {
@@ -120,7 +108,7 @@ app.post('/generate-clip', async (req, res) => {
   }
 });
 
-// ✅ API לשליפת קליפים מהדרייב
+// ✅ API לשליפת קליפים
 app.get('/clips', async (req, res) => {
   try {
     const auth = new GoogleAuth({
@@ -130,8 +118,8 @@ app.get('/clips', async (req, res) => {
 
     const authClient = await auth.getClient();
     const drive = google.drive({ version: 'v3', auth: authClient });
-
     const folderId = '1onJ7niZb1PE1UBvDu2yBuiW1ZCzADv2C';
+
     const response = await drive.files.list({
       q: `'${folderId}' in parents and trashed = false`,
       fields: 'files(id, name, createdTime)',
@@ -141,7 +129,7 @@ app.get('/clips', async (req, res) => {
     const files = response.data.files;
 
     const clips = await Promise.all(
-      files.filter(file => file.name.endsWith('.mp4')).map(async (file) => {
+      files.filter(f => f.name.endsWith('.mp4')).map(async (file) => {
         const baseName = path.basename(file.name, '.mp4');
         const metadataFileName = `${baseName}.meta.json`;
         const metadataFile = files.find(f => f.name === metadataFileName);
@@ -150,15 +138,9 @@ app.get('/clips', async (req, res) => {
 
         if (metadataFile) {
           try {
-            const metadataResponse = await drive.files.get({
-              fileId: metadataFile.id,
-              alt: 'media',
-            }, { responseType: 'stream' });
-
+            const metadataResponse = await drive.files.get({ fileId: metadataFile.id, alt: 'media' }, { responseType: 'stream' });
             const chunks = [];
-            for await (const chunk of metadataResponse.data) {
-              chunks.push(chunk);
-            }
+            for await (const chunk of metadataResponse.data) chunks.push(chunk);
             const buffer = Buffer.concat(chunks);
             metadata = JSON.parse(buffer.toString());
           } catch (err) {
@@ -188,5 +170,5 @@ app.get('/clips', async (req, res) => {
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-  console.log(`Video Clipper running on port ${PORT}`);
+  console.log(`🚀 Video Clipper running on port ${PORT}`);
 });
