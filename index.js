@@ -33,13 +33,13 @@ app.post('/upload-full-game', upload.single('file'), async (req, res) => {
     const match_id = req.body.match_id || uuidv4();
     if (!file) return res.status(400).send('No file uploaded');
 
-    console.log(📄 File received: ${file.originalname}, size: ${file.size} bytes);
+    console.log(`📄 File received: ${file.originalname}, size: ${file.size} bytes`);
 
-    const fileName = full_game_${match_id}.mp4;
+    const fileName = `full_game_${match_id}.mp4`;
     const folderId = '1vu6elArxj6YKLZePXjoqp_UFrDiI5ZOC';
-    console.log(🚀 Uploading ${fileName} to Google Drive...);
+    console.log(`🚀 Uploading ${fileName} to Google Drive...`);
     const driveResponse = await uploadToDrive(file.path, fileName, folderId);
-    console.log(✅ Upload successful: ${driveResponse.id});
+    console.log(`✅ Upload successful: ${driveResponse.id}`);
 
     fs.unlinkSync(file.path);
     console.log("🧹 Temp file deleted");
@@ -67,19 +67,19 @@ app.post('/generate-clips', async (req, res) => {
   console.log("🎬 Received /generate-clips request:", req.body);
 
   const videoId = uuidv4();
-  const inputPath = /tmp/input_${videoId}.mp4;
+  const inputPath = `/tmp/input_${videoId}.mp4`;
 
   try {
     const response = await fetch(videoUrl);
     const buffer = await response.buffer();
 
     if (!buffer || buffer.length < 10000) {
-      console.error(❌ File too small: ${buffer.length});
+      console.error(`❌ File too small: ${buffer.length}`);
       return res.status(400).send('Downloaded file too small or invalid');
     }
 
     fs.writeFileSync(inputPath, buffer);
-    console.log(✅ Full video downloaded: ${inputPath}, size: ${buffer.length} bytes);
+    console.log(`✅ Full video downloaded: ${inputPath}, size: ${buffer.length} bytes`);
 
     const folderId = '1onJ7niZb1PE1UBvDu2yBuiW1ZCzADv2C';
     const results = [];
@@ -95,11 +95,11 @@ app.post('/generate-clips', async (req, res) => {
       } = action;
 
       const clipId = uuidv4();
-      const clipPath = /tmp/clip_${clipId}.mp4;
-      const metadataPath = /tmp/clip_${clipId}.meta.json;
+      const clipPath = `/tmp/clip_${clipId}.mp4`;
+      const metadataPath = `/tmp/clip_${clipId}.meta.json`;
       const startTime = Math.max(0, timestamp - 9);
 
-      console.log(🎞 Creating clip: start=${startTime}, duration=${duration}, player=${player_name});
+      console.log(`🎞️ Creating clip: start=${startTime}, duration=${duration}, player=${player_name}`);
 
       await new Promise((resolve, reject) => {
         ffmpeg(inputPath)
@@ -110,31 +110,31 @@ app.post('/generate-clips', async (req, res) => {
             console.log("🔧 FFmpeg started:", cmd);
           })
           .on('end', () => {
-            console.log(✅ FFmpeg finished for ${clipPath});
+            console.log(`✅ FFmpeg finished for ${clipPath}`);
             resolve();
           })
           .on('error', err => {
-            console.error(❌ FFmpeg failed for ${clipPath}:, err.message);
+            console.error(`❌ FFmpeg failed for ${clipPath}:`, err.message);
             reject(err);
           })
           .run();
       });
 
-      console.log(📤 Uploading clip to Drive: ${clipPath});
-      const clipName = clip_${clipId}.mp4;
+      console.log(`📤 Uploading clip to Drive: ${clipPath}`);
+      const clipName = `clip_${clipId}.mp4`;
       const driveClip = await uploadToDrive(clipPath, clipName, folderId);
-      console.log(✅ Clip uploaded: ${driveClip.id});
+      console.log(`✅ Clip uploaded: ${driveClip.id}`);
 
       const metadata = { player_id, player_name, action_type, match_id };
       fs.writeFileSync(metadataPath, JSON.stringify(metadata));
-      await uploadToDrive(metadataPath, clip_${clipId}.meta.json, folderId);
+      await uploadToDrive(metadataPath, `clip_${clipId}.meta.json`, folderId);
 
       results.push({
         external_id: driveClip.id,
         name: clipName,
         view_url: driveClip.webViewLink,
         download_url: driveClip.webContentLink,
-        thumbnail_url: https://drive.google.com/thumbnail?id=${driveClip.id},
+        thumbnail_url: `https://drive.google.com/thumbnail?id=${driveClip.id}`,
         duration,
         created_date: new Date().toISOString(),
         player_id,
@@ -158,5 +158,5 @@ app.post('/generate-clips', async (req, res) => {
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-  console.log(🚀 Video Clipper running on port ${PORT});
+  console.log(`🚀 Video Clipper running on port ${PORT}`);
 });
