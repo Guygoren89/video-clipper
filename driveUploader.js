@@ -3,15 +3,15 @@ const fs = require('fs');
 const { google } = require('googleapis');
 
 const auth = new google.auth.GoogleAuth({
-  scopes: ['https://www.googleapis.com/auth/drive'],
+  scopes: ['https://www.googleapis.com/auth/drive.file'],
 });
 
-async function uploadToDrive(filePath, fileName, folderId) {
-  try {
-    console.log(📤 Starting upload: ${fileName} to folder ${folderId});
-    
-    const driveService = google.drive({ version: 'v3', auth: await auth.getClient() });
+const drive = google.drive({ version: 'v3', auth });
 
+async function uploadToDrive(filePath, fileName, folderId) {
+  console.log(`📤 Starting upload: ${fileName} to folder ${folderId}`);
+
+  try {
     const fileMetadata = {
       name: fileName,
       parents: [folderId],
@@ -22,18 +22,18 @@ async function uploadToDrive(filePath, fileName, folderId) {
       body: fs.createReadStream(filePath),
     };
 
-    const response = await driveService.files.create({
+    const file = await drive.files.create({
       resource: fileMetadata,
       media: media,
       fields: 'id, webViewLink, webContentLink',
     });
 
-    console.log(✅ File uploaded: ${response.data.id});
-    return response.data;
-  } catch (err) {
-    console.error(❌ Failed to upload file ${fileName}:, err.message);
-    throw err;
+    console.log(`✅ File uploaded to Drive: ${file.data.id}`);
+    return file.data;
+  } catch (error) {
+    console.error(`❌ Failed to upload ${fileName}:`, error.message);
+    throw error;
   }
 }
 
-module.exports = uploadToDrive;
+module.exports = uploadToDrive;
