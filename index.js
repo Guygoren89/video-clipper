@@ -149,7 +149,8 @@ app.post('/generate-clips', async (req, res) => {
   }
 });
 
-const PORT = process.env.PORT || 3000;
+// ✅ פורט קבוע ל־Render
+const PORT = 10000;
 app.listen(PORT, () => {
   console.log(`🚀 Video Clipper running on port ${PORT}`);
 });
