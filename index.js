@@ -1,4 +1,4 @@
-// index.js (Phase 2 - generate-clip debug logging added)
+// index.js (Phase 2 - updated clip timing logic)
 const express = require('express');
 const ffmpeg = require('fluent-ffmpeg');
 const fs = require('fs');
@@ -64,7 +64,6 @@ app.post('/generate-clip', async (req, res) => {
   const {
     videoUrl,
     timestamp,
-    duration,
     player_id,
     player_name,
     action_type,
@@ -73,7 +72,7 @@ app.post('/generate-clip', async (req, res) => {
 
   console.log("🎬 Received /generate-clip request", req.body);
 
-  if (!videoUrl || timestamp == null || !duration) {
+  if (!videoUrl || timestamp == null) {
     console.log("❌ Missing parameters");
     return res.status(400).json({ error: 'Missing parameters' });
   }
@@ -83,9 +82,15 @@ app.post('/generate-clip', async (req, res) => {
   const outputPath = `/tmp/clip_${videoId}.mp4`;
   const metadataPath = `/tmp/clip_${videoId}.meta.json`;
 
+  const directDownloadUrl = videoUrl.includes('drive.google.com/file/d/')
+    ? videoUrl
+        .replace('https://drive.google.com/file/d/', 'https://drive.google.com/uc?id=')
+        .replace(/\/view\?.+$/, '&export=download')
+    : videoUrl;
+
   try {
-    console.log(`📥 Downloading video from ${videoUrl}`);
-    const response = await fetch(videoUrl);
+    console.log(`📥 Downloading video from ${directDownloadUrl}`);
+    const response = await fetch(directDownloadUrl);
     const buffer = await response.buffer();
 
     if (!buffer || buffer.length < 10000) {
@@ -96,9 +101,12 @@ app.post('/generate-clip', async (req, res) => {
     fs.writeFileSync(inputPath, buffer);
     console.log(`✅ Saved to ${inputPath}, size: ${buffer.length} bytes`);
 
+    const startTime = Math.max(0, timestamp - 9);
+    const clipDuration = 7;
+
     ffmpeg(inputPath)
-      .setStartTime(Math.max(0, timestamp - 5))
-      .setDuration(duration)
+      .setStartTime(startTime)
+      .setDuration(clipDuration)
       .output(outputPath)
       .on('start', commandLine => console.log("🔧 FFmpeg started:", commandLine))
       .on('end', async () => {
