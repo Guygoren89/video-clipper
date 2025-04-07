@@ -1,7 +1,6 @@
 const express = require('express');
 const ffmpeg = require('fluent-ffmpeg');
 const fs = require('fs');
-const fetch = require('node-fetch');
 const { v4: uuidv4 } = require('uuid');
 const cors = require('cors');
 const path = require('path');
@@ -14,10 +13,11 @@ const credentialsPath = process.env.GOOGLE_APPLICATION_CREDENTIALS;
 
 try {
   const raw = fs.readFileSync(credentialsPath, 'utf8');
+  console.log("✅ JSON credentials file found and readable");
   const parsed = JSON.parse(raw);
-  console.log("✅ Credentials loaded. Service Account:", parsed.client_email);
+  console.log("✅ Parsed successfully. client_email:", parsed.client_email);
 } catch (err) {
-  console.error("❌ Failed to read credentials JSON:", err);
+  console.error("❌ Failed to read or parse credentials JSON file:", err);
 }
 
 const app = express();
@@ -26,7 +26,7 @@ const upload = multer({ dest: '/tmp' });
 app.use(cors({ origin: '*' }));
 app.use(express.json());
 
-// ✅ העלאת משחק מלא
+// ✅ העלאת משחק מלא לדרייב
 app.post('/upload-full-game', upload.single('file'), async (req, res) => {
   try {
     const file = req.file;
@@ -43,15 +43,15 @@ app.post('/upload-full-game', upload.single('file'), async (req, res) => {
       message: 'Full game uploaded',
       file_id: driveResponse.id,
       view_url: driveResponse.webViewLink,
-      download_url: driveResponse.webContentLink
+      download_url: `gdrive://${driveResponse.id}`
     });
   } catch (err) {
-    console.error('❌ Upload failed:', err);
+    console.error('Upload failed:', err);
     res.status(500).send('Upload failed');
   }
 });
 
-// ✅ יצירת קליפ ממשחק
+// ✅ יצירת קליפ מקובץ קיים בדרייב לפי ID
 app.post('/generate-clip', async (req, res) => {
   const {
     videoUrl,
@@ -67,27 +67,38 @@ app.post('/generate-clip', async (req, res) => {
     return res.status(400).json({ error: 'Missing parameters' });
   }
 
-  // תרגום URL של Google Drive לצורת download
-  const directDownloadUrl = videoUrl.includes('drive.google.com/file/d/')
-    ? videoUrl
-        .replace('https://drive.google.com/file/d/', 'https://drive.google.com/uc?id=')
-        .replace(/\/view\?usp=sharing/, '&export=download')
-    : videoUrl;
+  // שליפה מתוך gdrive://{ID}
+  const fileIdMatch = videoUrl.match(/^gdrive:\/\/(.*)$/);
+  if (!fileIdMatch) {
+    return res.status(400).send('Invalid videoUrl - must start with gdrive://');
+  }
 
+  const fileId = fileIdMatch[1];
   const videoId = uuidv4();
   const inputPath = `/tmp/input_${videoId}.mp4`;
   const outputPath = `/tmp/clip_${videoId}.mp4`;
   const metadataPath = `/tmp/clip_${videoId}.meta.json`;
 
   try {
-    const response = await fetch(directDownloadUrl);
-    const buffer = await response.buffer();
-    fs.writeFileSync(inputPath, buffer);
+    const auth = new GoogleAuth({
+      keyFile: process.env.GOOGLE_APPLICATION_CREDENTIALS,
+      scopes: ['https://www.googleapis.com/auth/drive.readonly'],
+    });
+    const authClient = await auth.getClient();
+    const drive = google.drive({ version: 'v3', auth: authClient });
 
-    // בדיקת גודל הקובץ לפני FFmpeg
+    const dest = fs.createWriteStream(inputPath);
+    const driveRes = await drive.files.get({ fileId, alt: 'media' }, { responseType: 'stream' });
+
+    await new Promise((resolve, reject) => {
+      driveRes.data
+        .on('end', resolve)
+        .on('error', reject)
+        .pipe(dest);
+    });
+
     const stats = fs.statSync(inputPath);
-    if (stats.size < 100000) {
-      console.error("❌ File too small:", stats.size);
+    if (stats.size < 1000) {
       return res.status(400).send('Downloaded file too small or invalid');
     }
 
@@ -102,13 +113,7 @@ app.post('/generate-clip', async (req, res) => {
 
           const driveLink = await uploadToDrive(outputPath, clipFileName, folderId);
 
-          const metadata = {
-            player_id,
-            player_name,
-            action_type,
-            match_id
-          };
-
+          const metadata = { player_id, player_name, action_type, match_id };
           fs.writeFileSync(metadataPath, JSON.stringify(metadata));
           await uploadToDrive(metadataPath, `clip_${videoId}.meta.json`, folderId);
 
@@ -116,24 +121,24 @@ app.post('/generate-clip', async (req, res) => {
           fs.unlinkSync(outputPath);
           fs.unlinkSync(metadataPath);
 
-          res.json({ message: 'Clip and metadata uploaded', driveLink });
+          res.json({ message: 'Clip and metadata uploaded to Google Drive', driveLink });
         } catch (uploadErr) {
-          console.error('❌ Upload to Drive failed:', uploadErr);
+          console.error('Upload failed:', uploadErr);
           res.status(500).send('Upload to Google Drive failed');
         }
       })
       .on('error', (err) => {
-        console.error("❌ FFmpeg failed:", err);
+        console.error(err);
         res.status(500).send('FFmpeg failed');
       })
       .run();
   } catch (e) {
-    console.error("❌ Video download failed:", e);
+    console.error(e);
     res.status(500).send('Video download or processing failed');
   }
 });
 
-// ✅ שליפת קליפים
+// ✅ שליפת קליפים מדרייב
 app.get('/clips', async (req, res) => {
   try {
     const auth = new GoogleAuth({
@@ -171,10 +176,9 @@ app.get('/clips', async (req, res) => {
             for await (const chunk of metadataResponse.data) {
               chunks.push(chunk);
             }
-            const buffer = Buffer.concat(chunks);
-            metadata = JSON.parse(buffer.toString());
+            metadata = JSON.parse(Buffer.concat(chunks).toString());
           } catch (err) {
-            console.error(`❌ Failed to read metadata for ${file.name}:`, err);
+            console.error(`Failed to read metadata for ${file.name}:`, err);
           }
         }
 
@@ -200,5 +204,5 @@ app.get('/clips', async (req, res) => {
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-  console.log(`✅ Video Clipper running on port ${PORT}`);
+  console.log(`Video Clipper running on port ${PORT}`);
 });
