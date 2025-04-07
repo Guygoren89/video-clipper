@@ -1,4 +1,4 @@
-// index.js (Phase 3 - multiple clip generation support)
+// index.js (Phase 3 - support batch clip generation)
 const express = require('express');
 const ffmpeg = require('fluent-ffmpeg');
 const fs = require('fs');
@@ -9,6 +9,7 @@ const multer = require('multer');
 const uploadToDrive = require('./driveUploader');
 
 const credentialsPath = process.env.GOOGLE_APPLICATION_CREDENTIALS;
+
 try {
   const raw = fs.readFileSync(credentialsPath, 'utf8');
   console.log("✅ JSON credentials file found and readable");
@@ -55,79 +56,97 @@ app.post('/upload-full-game', upload.single('file'), async (req, res) => {
   }
 });
 
-// ✅ API ליצירת מספר קליפים בבת אחת
+// ✅ API חדש ליצירת מספר קליפים
 app.post('/generate-clips', async (req, res) => {
   const { videoUrl, actions } = req.body;
-  if (!videoUrl || !Array.isArray(actions) || actions.length === 0) {
-    return res.status(400).json({ error: 'Missing videoUrl or actions[]' });
+
+  if (!videoUrl || !Array.isArray(actions)) {
+    return res.status(400).json({ error: 'Missing or invalid videoUrl/actions' });
   }
 
-  console.log("🎬 Received /generate-clips request with", actions.length, "clips");
+  console.log("🎬 Received /generate-clips request:", req.body);
 
-  const results = [];
-  for (const action of actions) {
-    const {
-      timestamp,
-      duration = 7,
-      player_id,
-      player_name,
-      action_type,
-      match_id
-    } = action;
+  const videoId = uuidv4();
+  const inputPath = `/tmp/input_${videoId}.mp4`;
 
-    const clipId = uuidv4();
-    const inputPath = `/tmp/input_${clipId}.mp4`;
-    const outputPath = `/tmp/clip_${clipId}.mp4`;
-    const metadataPath = `/tmp/clip_${clipId}.meta.json`;
-    try {
-      const response = await fetch(videoUrl);
-      const buffer = await response.buffer();
+  try {
+    const response = await fetch(videoUrl);
+    const buffer = await response.buffer();
 
-      if (!buffer || buffer.length < 10000) {
-        console.error(`❌ Clip ${clipId} skipped: File too small (${buffer.length})`);
-        continue;
-      }
+    if (!buffer || buffer.length < 10000) {
+      console.error(`❌ File too small: ${buffer.length}`);
+      return res.status(400).send('Downloaded file too small or invalid');
+    }
 
-      fs.writeFileSync(inputPath, buffer);
-      console.log(`📥 Clip ${clipId}: Video saved to ${inputPath}`);
+    fs.writeFileSync(inputPath, buffer);
+    console.log(`✅ Full video downloaded: ${inputPath}, size: ${buffer.length} bytes`);
+
+    const folderId = '1onJ7niZb1PE1UBvDu2yBuiW1ZCzADv2C';
+    const results = [];
+
+    for (const action of actions) {
+      const {
+        timestamp,
+        duration,
+        player_id,
+        player_name,
+        action_type,
+        match_id
+      } = action;
+
+      const clipId = uuidv4();
+      const clipPath = `/tmp/clip_${clipId}.mp4`;
+      const metadataPath = `/tmp/clip_${clipId}.meta.json`;
+      const startTime = Math.max(0, timestamp - 9);
+
+      console.log(`🎞️ Creating clip: start=${startTime}, duration=${duration}`);
 
       await new Promise((resolve, reject) => {
         ffmpeg(inputPath)
-          .setStartTime(Math.max(0, timestamp - 9))
+          .setStartTime(startTime)
           .setDuration(duration)
-          .output(outputPath)
-          .on('start', cmd => console.log(`🔧 Clip ${clipId}: FFmpeg started`))
-          .on('end', async () => {
-            try {
-              const folderId = '1onJ7niZb1PE1UBvDu2yBuiW1ZCzADv2C';
-              const fileName = `clip_${clipId}.mp4`;
-              const driveLink = await uploadToDrive(outputPath, fileName, folderId);
-              const metadata = { player_id, player_name, action_type, match_id };
-              fs.writeFileSync(metadataPath, JSON.stringify(metadata));
-              await uploadToDrive(metadataPath, `clip_${clipId}.meta.json`, folderId);
-              results.push({ clip_id: clipId, driveLink });
-              fs.unlinkSync(inputPath);
-              fs.unlinkSync(outputPath);
-              fs.unlinkSync(metadataPath);
-              console.log(`✅ Clip ${clipId} uploaded`);
-              resolve();
-            } catch (err) {
-              console.error(`❌ Clip ${clipId} failed to upload`, err);
-              reject(err);
-            }
-          })
+          .output(clipPath)
+          .on('start', cmd => console.log("🔧 FFmpeg started:", cmd))
+          .on('end', resolve)
           .on('error', err => {
-            console.error(`❌ FFmpeg error (clip ${clipId}):`, err.message);
+            console.error('❌ FFmpeg failed:', err.message);
             reject(err);
           })
           .run();
       });
-    } catch (e) {
-      console.error(`❌ Error in clip ${clipId}:`, e.message);
-    }
-  }
 
-  res.json({ message: 'Finished processing clips', results });
+      const clipName = `clip_${clipId}.mp4`;
+      const driveClip = await uploadToDrive(clipPath, clipName, folderId);
+
+      const metadata = { player_id, player_name, action_type, match_id };
+      fs.writeFileSync(metadataPath, JSON.stringify(metadata));
+      await uploadToDrive(metadataPath, `clip_${clipId}.meta.json`, folderId);
+
+      results.push({
+        external_id: driveClip.id,
+        name: clipName,
+        view_url: driveClip.webViewLink,
+        download_url: driveClip.webContentLink,
+        thumbnail_url: `https://drive.google.com/thumbnail?id=${driveClip.id}`,
+        duration,
+        created_date: new Date().toISOString(),
+        player_id,
+        player_name,
+        action_type,
+        match_id
+      });
+
+      fs.unlinkSync(clipPath);
+      fs.unlinkSync(metadataPath);
+    }
+
+    fs.unlinkSync(inputPath);
+    console.log("✅ All clips created and uploaded");
+    res.json({ message: 'All clips uploaded', clips: results });
+  } catch (e) {
+    console.error('❌ Batch clip processing failed:', e.message);
+    res.status(500).send('Batch processing failed');
+  }
 });
 
 const PORT = process.env.PORT || 3000;
