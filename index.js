@@ -7,6 +7,8 @@ const cors = require('cors');
 const path = require('path');
 const multer = require('multer');
 const uploadToDrive = require('./driveUploader');
+const { google } = require('googleapis');
+const { GoogleAuth } = require('google-auth-library');
 
 const credentialsPath = process.env.GOOGLE_APPLICATION_CREDENTIALS;
 
@@ -121,9 +123,6 @@ app.post('/generate-clip', async (req, res) => {
 // ✅ API לשליפת קליפים מהדרייב
 app.get('/clips', async (req, res) => {
   try {
-    const { google } = require('googleapis');
-    const { GoogleAuth } = require('google-auth-library');
-
     const auth = new GoogleAuth({
       keyFile: process.env.GOOGLE_APPLICATION_CREDENTIALS,
       scopes: ['https://www.googleapis.com/auth/drive.readonly'],
