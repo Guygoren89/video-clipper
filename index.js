@@ -14,11 +14,10 @@ const credentialsPath = process.env.GOOGLE_APPLICATION_CREDENTIALS;
 
 try {
   const raw = fs.readFileSync(credentialsPath, 'utf8');
-  console.log("✅ JSON credentials file found and readable");
   const parsed = JSON.parse(raw);
-  console.log("✅ Parsed successfully. client_email:", parsed.client_email);
+  console.log("✅ Credentials loaded. Service Account:", parsed.client_email);
 } catch (err) {
-  console.error("❌ Failed to read or parse credentials JSON file:", err);
+  console.error("❌ Failed to read credentials JSON:", err);
 }
 
 const app = express();
@@ -27,7 +26,7 @@ const upload = multer({ dest: '/tmp' });
 app.use(cors({ origin: '*' }));
 app.use(express.json());
 
-// ✅ API להעלאת משחקים מלאים
+// ✅ העלאת משחק מלא
 app.post('/upload-full-game', upload.single('file'), async (req, res) => {
   try {
     const file = req.file;
@@ -47,12 +46,12 @@ app.post('/upload-full-game', upload.single('file'), async (req, res) => {
       download_url: driveResponse.webContentLink
     });
   } catch (err) {
-    console.error('Upload failed:', err);
+    console.error('❌ Upload failed:', err);
     res.status(500).send('Upload failed');
   }
 });
 
-// ✅ API ליצירת קליפ מתוך משחק עם תרגום אוטומטי ל-videoUrl
+// ✅ יצירת קליפ ממשחק
 app.post('/generate-clip', async (req, res) => {
   const {
     videoUrl,
@@ -68,7 +67,7 @@ app.post('/generate-clip', async (req, res) => {
     return res.status(400).json({ error: 'Missing parameters' });
   }
 
-  // תרגום videoUrl לצורת download
+  // תרגום URL של Google Drive לצורת download
   const directDownloadUrl = videoUrl.includes('drive.google.com/file/d/')
     ? videoUrl
         .replace('https://drive.google.com/file/d/', 'https://drive.google.com/uc?id=')
@@ -85,9 +84,16 @@ app.post('/generate-clip', async (req, res) => {
     const buffer = await response.buffer();
     fs.writeFileSync(inputPath, buffer);
 
+    // בדיקת גודל הקובץ לפני FFmpeg
+    const stats = fs.statSync(inputPath);
+    if (stats.size < 100000) {
+      console.error("❌ File too small:", stats.size);
+      return res.status(400).send('Downloaded file too small or invalid');
+    }
+
     ffmpeg(inputPath)
       .setStartTime(Math.max(0, timestamp - 5))
-      .setDuration(6)
+      .setDuration(duration)
       .output(outputPath)
       .on('end', async () => {
         try {
@@ -110,24 +116,24 @@ app.post('/generate-clip', async (req, res) => {
           fs.unlinkSync(outputPath);
           fs.unlinkSync(metadataPath);
 
-          res.json({ message: 'Clip and metadata uploaded to Google Drive', driveLink });
+          res.json({ message: 'Clip and metadata uploaded', driveLink });
         } catch (uploadErr) {
-          console.error('Upload failed:', uploadErr);
+          console.error('❌ Upload to Drive failed:', uploadErr);
           res.status(500).send('Upload to Google Drive failed');
         }
       })
       .on('error', (err) => {
-        console.error(err);
+        console.error("❌ FFmpeg failed:", err);
         res.status(500).send('FFmpeg failed');
       })
       .run();
   } catch (e) {
-    console.error(e);
+    console.error("❌ Video download failed:", e);
     res.status(500).send('Video download or processing failed');
   }
 });
 
-// ✅ API לשליפת קליפים
+// ✅ שליפת קליפים
 app.get('/clips', async (req, res) => {
   try {
     const auth = new GoogleAuth({
@@ -154,7 +160,6 @@ app.get('/clips', async (req, res) => {
         const metadataFile = files.find(f => f.name === metadataFileName);
 
         let metadata = {};
-
         if (metadataFile) {
           try {
             const metadataResponse = await drive.files.get({
@@ -169,7 +174,7 @@ app.get('/clips', async (req, res) => {
             const buffer = Buffer.concat(chunks);
             metadata = JSON.parse(buffer.toString());
           } catch (err) {
-            console.error(`Failed to read metadata for ${file.name}:`, err);
+            console.error(`❌ Failed to read metadata for ${file.name}:`, err);
           }
         }
 
@@ -195,5 +200,5 @@ app.get('/clips', async (req, res) => {
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-  console.log(`Video Clipper running on port ${PORT}`);
+  console.log(`✅ Video Clipper running on port ${PORT}`);
 });
