@@ -25,7 +25,7 @@ const upload = multer({ dest: '/tmp' });
 app.use(cors({ origin: '*' }));
 app.use(express.json());
 
-// ✅ העלאת משחק מלא
+// ✅ Upload full game
 app.post('/upload-full-game', upload.single('file'), async (req, res) => {
   try {
     console.log("📥 Received /upload-full-game request");
@@ -56,7 +56,7 @@ app.post('/upload-full-game', upload.single('file'), async (req, res) => {
   }
 });
 
-// ✅ יצירת קליפים
+// ✅ Batch generate clips
 app.post('/generate-clips', async (req, res) => {
   const { videoUrl, actions } = req.body;
 
@@ -99,31 +99,24 @@ app.post('/generate-clips', async (req, res) => {
       const metadataPath = `/tmp/clip_${clipId}.meta.json`;
       const startTime = Math.max(0, timestamp - 9);
 
-      console.log(`🎞️ Creating clip: start=${startTime}, duration=${duration}, player=${player_name}`);
+      console.log(`🎞️ Creating clip: start=${startTime}, duration=${duration}`);
 
       await new Promise((resolve, reject) => {
         ffmpeg(inputPath)
           .setStartTime(startTime)
           .setDuration(duration)
           .output(clipPath)
-          .on('start', cmd => {
-            console.log("🔧 FFmpeg started:", cmd);
-          })
-          .on('end', () => {
-            console.log(`✅ FFmpeg finished for ${clipPath}`);
-            resolve();
-          })
+          .on('start', cmd => console.log("🔧 FFmpeg started:", cmd))
+          .on('end', resolve)
           .on('error', err => {
-            console.error(`❌ FFmpeg failed for ${clipPath}:`, err.message);
+            console.error('❌ FFmpeg failed:', err.message);
             reject(err);
           })
           .run();
       });
 
-      console.log(`📤 Uploading clip to Drive: ${clipPath}`);
       const clipName = `clip_${clipId}.mp4`;
       const driveClip = await uploadToDrive(clipPath, clipName, folderId);
-      console.log(`✅ Clip uploaded: ${driveClip.id}`);
 
       const metadata = { player_id, player_name, action_type, match_id };
       fs.writeFileSync(metadataPath, JSON.stringify(metadata));
@@ -151,7 +144,7 @@ app.post('/generate-clips', async (req, res) => {
     console.log("✅ All clips created and uploaded");
     res.json({ message: 'All clips uploaded', clips: results });
   } catch (e) {
-    console.error('❌ Batch clip processing failed:', e);
+    console.error('❌ Batch clip processing failed:', e.message);
     res.status(500).send('Batch processing failed');
   }
 });
