@@ -2,16 +2,21 @@
 const fs = require('fs');
 const { google } = require('googleapis');
 
-const auth = new google.auth.GoogleAuth({
-  scopes: ['https://www.googleapis.com/auth/drive.file'],
-});
+async function getDriveService() {
+  const auth = new google.auth.GoogleAuth({
+    keyFile: process.env.GOOGLE_APPLICATION_CREDENTIALS,
+    scopes: ['https://www.googleapis.com/auth/drive.file'],
+  });
 
-const drive = google.drive({ version: 'v3', auth });
+  const authClient = await auth.getClient();
+  return google.drive({ version: 'v3', auth: authClient });
+}
 
 async function uploadToDrive(filePath, fileName, folderId) {
   console.log(`📤 Starting upload: ${fileName} to folder ${folderId}`);
-
   try {
+    const drive = await getDriveService();
+
     const fileMetadata = {
       name: fileName,
       parents: [folderId],
