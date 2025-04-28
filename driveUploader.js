@@ -44,8 +44,6 @@ async function uploadToDrive({ filePath, thumbnailPath, metadata }) {
   const viewUrl = `https://drive.google.com/file/d/${fileId}/view`;
   const downloadUrl = `https://drive.google.com/uc?export=download&id=${fileId}`;
 
-  // TODO: optionally upload thumbnail if needed
-
   return {
     external_id: metadata.clip_id,
     name: metadata.player_name,
@@ -74,7 +72,25 @@ async function generateThumbnail(videoPath) {
   });
 }
 
+async function listClipsFromDrive() {
+  const response = await drive.files.list({
+    q: `'${CLIPS_FOLDER_ID}' in parents and trashed = false`,
+    fields: 'files(id, name, createdTime, thumbnailLink, webViewLink, webContentLink)',
+    orderBy: 'createdTime desc',
+  });
+
+  return response.data.files.map(file => ({
+    external_id: file.id,
+    name: file.name,
+    view_url: file.webViewLink,
+    download_url: file.webContentLink,
+    thumbnail_url: file.thumbnailLink || '',
+    created_date: file.createdTime,
+  }));
+}
+
 module.exports = {
   uploadToDrive,
   generateThumbnail,
+  listClipsFromDrive
 };
