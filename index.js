@@ -4,7 +4,7 @@ const axios = require('axios');
 const fs = require('fs');
 const { exec } = require('child_process');
 const path = require('path');
-const { uploadToDrive, generateThumbnail } = require('./driveUploader');
+const { uploadToDrive, generateThumbnail, listClipsFromDrive } = require('./driveUploader');
 const app = express();
 app.use(express.json());
 
@@ -80,6 +80,16 @@ app.post('/generate-clips', async (req, res) => {
   } catch (error) {
     console.error('🔥 Fatal error:', error.message);
     res.status(500).json({ success: false, error: 'Failed to process clips' });
+  }
+});
+
+app.get('/clips', async (req, res) => {
+  try {
+    const clips = await listClipsFromDrive();
+    res.status(200).json({ success: true, clips });
+  } catch (error) {
+    console.error('🔥 Failed to fetch clips:', error.message);
+    res.status(500).json({ success: false, error: 'Failed to fetch clips' });
   }
 });
 
