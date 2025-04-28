@@ -4,12 +4,70 @@ const axios = require('axios');
 const fs = require('fs');
 const { exec } = require('child_process');
 const path = require('path');
+const multer = require('multer');
 const { uploadToDrive, generateThumbnail, listClipsFromDrive } = require('./driveUploader');
+const { google } = require('googleapis');
+
 const app = express();
 app.use(express.json());
 
 const PORT = process.env.PORT || 10000;
+const upload = multer({ dest: '/tmp' });
 
+// התחברות ל-Google Drive
+const SCOPES = ['https://www.googleapis.com/auth/drive'];
+const auth = new google.auth.GoogleAuth({
+  scopes: SCOPES,
+});
+const drive = google.drive({ version: 'v3', auth });
+
+// קליטת סרטון מלא והעלאה לדרייב
+app.post('/upload-full-game', upload.single('file'), async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ success: false, error: 'No file uploaded' });
+    }
+
+    const { path: filePath, originalname } = req.file;
+
+    const fileMetadata = {
+      name: originalname,
+      parents: ['1vu6elArxj6YKLZePXjoqp_UFrDiI5ZOC'] // תיקיית משחקים מלאים
+    };
+
+    const media = {
+      mimeType: 'video/mp4',
+      body: fs.createReadStream(filePath),
+    };
+
+    const driveResponse = await drive.files.create({
+      requestBody: fileMetadata,
+      media,
+      fields: 'id, webViewLink',
+    });
+
+    const fileId = driveResponse.data.id;
+
+    await drive.permissions.create({
+      fileId,
+      requestBody: {
+        role: 'reader',
+        type: 'anyone',
+      },
+    });
+
+    const viewUrl = `https://drive.google.com/file/d/${fileId}/view`;
+
+    fs.unlinkSync(filePath);
+
+    res.status(200).json({ success: true, view_url: viewUrl });
+  } catch (error) {
+    console.error('🔥 Failed to upload full game:', error.message);
+    res.status(500).json({ success: false, error: 'Failed to upload full game' });
+  }
+});
+
+// יצירת קליפים מווידאו
 app.post('/generate-clips', async (req, res) => {
   const { videoUrl, actions } = req.body;
   console.log('🎬 Received /generate-clips request:', JSON.stringify(req.body, null, 2));
@@ -83,6 +141,7 @@ app.post('/generate-clips', async (req, res) => {
   }
 });
 
+// שליפת קליפים
 app.get('/clips', async (req, res) => {
   try {
     const clips = await listClipsFromDrive();
