@@ -1,3 +1,21 @@
+const express = require('express');
+const { v4: uuidv4 } = require('uuid');
+const axios = require('axios');
+const fs = require('fs');
+const { exec } = require('child_process');
+const path = require('path');
+const multer = require('multer');
+const cors = require('cors');
+const { uploadToDrive } = require('./driveUploader');
+
+const app = express();
+app.use(cors());
+app.use(express.json());
+
+const PORT = process.env.PORT || 10000;
+const upload = multer({ dest: '/tmp' });
+
+// ✅ נקודת העלאת מקטע וידאו
 app.post('/upload-segment', upload.single('file'), async (req, res) => {
   try {
     if (!req.file) {
@@ -45,4 +63,8 @@ app.post('/upload-segment', upload.single('file'), async (req, res) => {
     console.error('🔥 Error in /upload-segment:', error.message);
     res.status(500).json({ success: false, error: 'Internal Server Error' });
   }
+});
+
+app.listen(PORT, () => {
+  console.log(`🚀 Video Clipper running on port ${PORT}`);
 });
