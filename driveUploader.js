@@ -1,16 +1,18 @@
 const fs = require('fs');
 const path = require('path');
 const { google } = require('googleapis');
+const { v4: uuidv4 } = require('uuid');
+const { exec } = require('child_process');
 
 const SCOPES = ['https://www.googleapis.com/auth/drive'];
 const auth = new google.auth.GoogleAuth({ scopes: SCOPES });
 const drive = google.drive({ version: 'v3', auth });
 
-const CLIPS_FOLDER_ID = '1onJ7niZb1PE1UBvDu2yBuiW1ZCzADv2C'; // תיקיית הקליפים
+const CLIPS_FOLDER_ID = '1onJ7niZb1PE1UBvDu2yBuiW1ZCzADv2C';
 
 async function uploadToDrive({ filePath, metadata }) {
   const fileMetadata = {
-    name: metadata.clip_id + '.mp4',
+    name: `${metadata.match_id}_${path.basename(filePath)}`,
     parents: [CLIPS_FOLDER_ID],
   };
 
@@ -53,24 +55,50 @@ async function uploadToDrive({ filePath, metadata }) {
   };
 }
 
+async function generateThumbnail(videoPath) {
+  return new Promise((resolve, reject) => {
+    const thumbnailPath = `${videoPath.replace('.mp4', '')}_thumb.jpg`;
+    const cmd = `ffmpeg -i ${videoPath} -ss 00:00:01.000 -vframes 1 ${thumbnailPath}`;
+    exec(cmd, (error) => {
+      if (error) {
+        return reject(error);
+      }
+      resolve(thumbnailPath);
+    });
+  });
+}
+
 async function downloadFileFromDrive(fileId, destinationPath) {
   const dest = fs.createWriteStream(destinationPath);
-  const res = await drive.files.get(
-    { fileId, alt: 'media' },
-    { responseType: 'stream' }
-  );
+  const res = await drive.files.get({ fileId, alt: 'media' }, { responseType: 'stream' });
+
   await new Promise((resolve, reject) => {
-    res.data
-      .pipe(dest)
-      .on('finish', () => {
-        console.log(`✅ Downloaded file ${fileId}`);
-        resolve();
-      })
-      .on('error', reject);
+    res.data.pipe(dest);
+    dest.on('finish', resolve);
+    dest.on('error', reject);
   });
+}
+
+async function listClipsFromDrive() {
+  const response = await drive.files.list({
+    q: `'${CLIPS_FOLDER_ID}' in parents and trashed = false`,
+    fields: 'files(id, name, createdTime, thumbnailLink, webViewLink, webContentLink)',
+    orderBy: 'createdTime desc',
+  });
+
+  return response.data.files.map(file => ({
+    external_id: file.id,
+    name: file.name,
+    view_url: file.webViewLink,
+    download_url: file.webContentLink,
+    thumbnail_url: file.thumbnailLink || '',
+    created_date: file.createdTime,
+  }));
 }
 
 module.exports = {
   uploadToDrive,
+  generateThumbnail,
   downloadFileFromDrive,
+  listClipsFromDrive
 };
