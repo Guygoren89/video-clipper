@@ -8,12 +8,12 @@ const SCOPES = ['https://www.googleapis.com/auth/drive'];
 const auth = new google.auth.GoogleAuth({ scopes: SCOPES });
 const drive = google.drive({ version: 'v3', auth });
 
-const CLIPS_FOLDER_ID = '1onJ7niZb1PE1UBvDu2yBuiW1ZCzADv2C';
+const DEFAULT_CLIPS_FOLDER_ID = '1onJ7niZb1PE1UBvDu2yBuiW1ZCzADv2C'; // Short_clips
 
-async function uploadToDrive({ filePath, metadata, custom_name = null }) {
+async function uploadToDrive({ filePath, metadata, custom_name = null, folderId = DEFAULT_CLIPS_FOLDER_ID }) {
   const fileMetadata = {
     name: custom_name ? custom_name : `${metadata.match_id}_${path.basename(filePath)}`,
-    parents: [CLIPS_FOLDER_ID],
+    parents: [folderId],
   };
 
   const media = {
@@ -79,9 +79,9 @@ async function downloadFileFromDrive(fileId, destinationPath) {
   });
 }
 
-async function listClipsFromDrive() {
+async function listClipsFromDrive(folderId = DEFAULT_CLIPS_FOLDER_ID) {
   const response = await drive.files.list({
-    q: `'${CLIPS_FOLDER_ID}' in parents and trashed = false`,
+    q: `'${folderId}' in parents and trashed = false`,
     fields: 'files(id, name, createdTime, thumbnailLink, webViewLink, webContentLink)',
     orderBy: 'createdTime desc',
   });
