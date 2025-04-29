@@ -6,7 +6,6 @@ const { exec } = require('child_process');
 const { uploadToDrive } = require('./driveUploader');
 
 const TEMP_FOLDER = '/tmp';
-const CLIPS_FOLDER_ID = '1onJ7niZb1PE1UBvDu2yBuiW1ZCzADv2C'; // Short_clips
 
 const SCOPES = ['https://www.googleapis.com/auth/drive'];
 const auth = new google.auth.GoogleAuth({ scopes: SCOPES });
@@ -48,13 +47,12 @@ async function cutClip(fileId, startTime, duration, extraMetadata = {}) {
     action_type: extraMetadata.action_type || 'unknown_action',
   };
 
-  // ✅ שם קובץ כולל match_id לזיהוי ב-GET
   const customFileName = `${metadata.action_type}_${metadata.player_name}_${metadata.match_id}_${metadata.clip_id}.mp4`;
 
   const uploadedClip = await uploadToDrive({ 
     filePath: outputPath, 
     metadata, 
-    custom_name: customFileName 
+    custom_name: customFileName // ✅ הועבר כאן
   });
 
   fs.unlinkSync(inputPath);
