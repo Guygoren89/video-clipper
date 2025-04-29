@@ -48,7 +48,8 @@ async function cutClip(fileId, startTime, duration, extraMetadata = {}) {
     action_type: extraMetadata.action_type || 'unknown_action',
   };
 
-  const customFileName = `${metadata.action_type}_${metadata.player_name}_${metadata.clip_id}.mp4`;
+  // ✅ שם קובץ כולל match_id לזיהוי ב-GET
+  const customFileName = `${metadata.action_type}_${metadata.player_name}_${metadata.match_id}_${metadata.clip_id}.mp4`;
 
   const uploadedClip = await uploadToDrive({ 
     filePath: outputPath, 
