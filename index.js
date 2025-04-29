@@ -60,7 +60,6 @@ app.post('/upload-segment', upload.single('file'), async (req, res) => {
         player_id: 'segment_mode',
         player_name: 'מקטע בדיקה',
         action_type: 'segment_upload',
-        custom_name: `segment_${match_id}_${Date.now()}.mp4`
       },
     });
 
@@ -141,21 +140,70 @@ app.post('/merge-segments', async (req, res) => {
   }
 });
 
-// ✅ Endpoint חדש: חיתוך מתוך סרטון קיים בדרייב
+// ✅ Endpoint חדש: חיתוך מתוך סרטון קיים בדרייב (בודד)
 app.post('/cut-test-clip', async (req, res) => {
   try {
-    const { file_id, start_time, duration } = req.body;
+    const { file_id, start_time, duration, action_type = 'manual_cut', player_name = 'unknown_player' } = req.body;
     if (!file_id || !start_time || !duration) {
       return res.status(400).json({ success: false, error: 'Missing parameters' });
     }
 
-    const clip = await cutClip(file_id, start_time, duration);
+    const clip = await cutClip(file_id, start_time, duration, { action_type, player_name });
     res.status(200).json({ success: true, clip });
   } catch (error) {
     console.error('🔥 Error in /cut-test-clip:', error.message);
     res.status(500).json({ success: false, error: 'Internal Server Error' });
   }
 });
+
+// ✅ Endpoint חדש: חיתוך אוטומטי מרשימת פעולות
+const CUT_BACK_SECONDS = 8;
+const CLIP_DURATION_SECONDS = 8;
+
+app.post('/auto-generate-clips', async (req, res) => {
+  try {
+    const { file_id, actions } = req.body;
+    if (!file_id || !Array.isArray(actions) || actions.length === 0) {
+      return res.status(400).json({ success: false, error: 'Missing parameters' });
+    }
+
+    const results = [];
+
+    for (const action of actions) {
+      const { action_type, player_name, start_time } = action;
+      if (!action_type || !player_name || !start_time) {
+        continue;
+      }
+
+      const adjustedStartTime = subtractSeconds(start_time, CUT_BACK_SECONDS);
+
+      const clip = await cutClip(file_id, adjustedStartTime, CLIP_DURATION_SECONDS, {
+        action_type,
+        player_name
+      });
+
+      results.push(clip);
+    }
+
+    res.status(200).json({ success: true, clips: results });
+  } catch (error) {
+    console.error('🔥 Error in /auto-generate-clips:', error.message);
+    res.status(500).json({ success: false, error: 'Internal Server Error' });
+  }
+});
+
+// עזר: פונקציה להוריד שניות
+function subtractSeconds(timeStr, seconds) {
+  const [hh, mm, ss] = timeStr.split(':').map(Number);
+  let totalSeconds = hh * 3600 + mm * 60 + ss;
+  totalSeconds = Math.max(0, totalSeconds - seconds);
+
+  const newH = String(Math.floor(totalSeconds / 3600)).padStart(2, '0');
+  const newM = String(Math.floor((totalSeconds % 3600) / 60)).padStart(2, '0');
+  const newS = String(totalSeconds % 60).padStart(2, '0');
+
+  return `${newH}:${newM}:${newS}`;
+}
 
 app.listen(PORT, () => {
   console.log(`🚀 Video Clipper running on port ${PORT}`);
