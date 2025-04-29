@@ -23,9 +23,10 @@ async function downloadFile(fileId, destPath) {
   });
 }
 
-async function cutClip(fileId, startTime, duration) {
-  const inputPath = path.join(TEMP_FOLDER, `input_${Date.now()}.mp4`);
-  const outputPath = path.join(TEMP_FOLDER, `clip_${Date.now()}.mp4`);
+async function cutClip(fileId, startTime, duration, extraMetadata = {}) {
+  const timestamp = Date.now();
+  const inputPath = path.join(TEMP_FOLDER, `input_${timestamp}.mp4`);
+  const outputPath = path.join(TEMP_FOLDER, `clip_${timestamp}.mp4`);
 
   await downloadFile(fileId, inputPath);
 
@@ -38,16 +39,22 @@ async function cutClip(fileId, startTime, duration) {
   });
 
   const metadata = {
-    clip_id: Date.now().toString(),
+    clip_id: timestamp.toString(),
     match_id: 'manual_test',
     created_date: new Date().toISOString(),
     duration: duration,
     player_id: 'manual',
-    player_name: 'בדיקת חיתוך',
-    action_type: 'manual_cut',
+    player_name: extraMetadata.player_name || 'לא ידוע',
+    action_type: extraMetadata.action_type || 'unknown_action',
   };
 
-  const uploadedClip = await uploadToDrive({ filePath: outputPath, metadata });
+  const customFileName = `${metadata.action_type}_${metadata.player_name}_${metadata.clip_id}.mp4`;
+
+  const uploadedClip = await uploadToDrive({ 
+    filePath: outputPath, 
+    metadata, 
+    custom_name: customFileName 
+  });
 
   fs.unlinkSync(inputPath);
   fs.unlinkSync(outputPath);
