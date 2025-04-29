@@ -2,7 +2,6 @@
 
 const express = require('express');
 const { v4: uuidv4 } = require('uuid');
-const axios = require('axios');
 const fs = require('fs');
 const { exec } = require('child_process');
 const path = require('path');
@@ -19,13 +18,13 @@ app.use(express.json());
 const PORT = process.env.PORT || 10000;
 const upload = multer({ storage: multer.memoryStorage() });
 
-const SCOPES = ['https://www.googleapis.com/auth/drive'];
-const auth = new google.auth.GoogleAuth({ scopes: SCOPES });
-const drive = google.drive({ version: 'v3', auth });
-
 const CLIPS_FOLDER_ID = '1onJ7niZb1PE1UBvDu2yBuiW1ZCzADv2C'; // Short_clips
+const FULL_FOLDER_ID = '1pp2pexCa8q2wmdMBa8LLybF_WoX_pdwc'; // Full_clips
 
-// ✅ Endpoint להעלאת מקטע
+const CUT_BACK_SECONDS = 8;
+const CLIP_DURATION_SECONDS = 8;
+
+// ✅ Endpoint להעלאת מקטע (20 שניות) לתיקיית Full_clips
 app.post('/upload-segment', upload.single('file'), async (req, res) => {
   try {
     if (!req.file) {
@@ -63,6 +62,7 @@ app.post('/upload-segment', upload.single('file'), async (req, res) => {
         player_name: 'מקטע בדיקה',
         action_type: 'segment_upload',
       },
+      folderId: FULL_FOLDER_ID, // ✅ שמירה בתיקייה של מקטעים מלאים
     });
 
     fs.unlinkSync(inputPath);
@@ -75,74 +75,41 @@ app.post('/upload-segment', upload.single('file'), async (req, res) => {
   }
 });
 
-// ✅ Endpoint לחיבור מקטעים
-app.post('/merge-segments', async (req, res) => {
+// ✅ Endpoint לחיתוך קליפים לפי פעולות – כל פעולה מקבלת file_id נפרד
+app.post('/auto-generate-from-segments', async (req, res) => {
   try {
-    const { match_id } = req.body;
-    if (!match_id) {
-      return res.status(400).json({ success: false, error: 'Missing match_id' });
+    const { clips } = req.body;
+    if (!Array.isArray(clips) || clips.length === 0) {
+      return res.status(400).json({ success: false, error: 'Missing clips array' });
     }
 
-    console.log(`🧩 Starting merge for match_id: ${match_id}`);
+    const results = [];
 
-    const response = await drive.files.list({
-      q: `'${CLIPS_FOLDER_ID}' in parents and trashed = false and name contains '${match_id}'`,
-      fields: 'files(id, name, createdTime)',
-      orderBy: 'createdTime asc',
-    });
+    for (const clip of clips) {
+      const { file_id, start_time, action_type, player_name, match_id } = clip;
+      if (!file_id || !start_time || !action_type || !player_name || !match_id) {
+        continue;
+      }
 
-    const files = response.data.files;
-    if (!files.length) {
-      return res.status(404).json({ success: false, error: 'No segments found' });
-    }
+      const adjustedStartTime = subtractSeconds(start_time, CUT_BACK_SECONDS);
 
-    console.log(`📂 Found ${files.length} segments`);
-
-    const inputPaths = [];
-    for (const file of files) {
-      const filePath = `/tmp/${file.name}`;
-      await downloadFileFromDrive(file.id, filePath);
-      inputPaths.push(filePath);
-    }
-
-    const listPath = '/tmp/segments.txt';
-    fs.writeFileSync(listPath, inputPaths.map(p => `file '${p}'`).join('\n'));
-
-    const mergedPath = `/tmp/merged_${uuidv4()}.mp4`;
-    const ffmpegCmd = `ffmpeg -f concat -safe 0 -i ${listPath} -c copy -y ${mergedPath}`;
-    console.log(`🔧 Running FFmpeg merge: ${ffmpegCmd}`);
-
-    await new Promise((resolve, reject) => {
-      exec(ffmpegCmd, (error) => {
-        if (error) {
-          console.error('❌ FFmpeg merge failed:', error.message);
-          return reject(error);
-        }
-        resolve();
+      const result = await cutClip(file_id, adjustedStartTime, CLIP_DURATION_SECONDS, {
+        action_type,
+        player_name,
+        match_id
       });
-    });
 
-    const driveRes = await uploadToDrive({
-      filePath: mergedPath,
-      metadata: {
-        clip_id: uuidv4(),
-        match_id,
-        player_id: 'merged_game',
-        player_name: 'משחק מחובר',
-        action_type: 'merged_video',
-        created_date: new Date().toISOString(),
-        duration: '',
-      },
-    });
+      results.push(result);
+    }
 
-    res.status(200).json({ success: true, merged_video: driveRes });
+    res.status(200).json({ success: true, clips: results });
   } catch (error) {
-    console.error('🔥 Error in /merge-segments:', error.message);
+    console.error('🔥 Error in /auto-generate-from-segments:', error.message);
     res.status(500).json({ success: false, error: 'Internal Server Error' });
   }
 });
 
-// ✅ Endpoint חיתוך בודד
+// ✅ חיתוך בדיקה ידני
 app.post('/cut-test-clip', async (req, res) => {
   try {
     const { file_id, start_time, duration, action_type = 'manual_cut', player_name = 'unknown_player', match_id = 'manual_test' } = req.body;
@@ -158,44 +125,7 @@ app.post('/cut-test-clip', async (req, res) => {
   }
 });
 
-// ✅ Endpoint אוטומטי חכם
-const CUT_BACK_SECONDS = 8;
-const CLIP_DURATION_SECONDS = 8;
-
-app.post('/auto-generate-clips', async (req, res) => {
-  try {
-    const { file_id, actions, match_id } = req.body;
-    if (!file_id || !Array.isArray(actions) || actions.length === 0 || !match_id) {
-      return res.status(400).json({ success: false, error: 'Missing parameters' });
-    }
-
-    const results = [];
-
-    for (const action of actions) {
-      const { action_type, player_name, start_time } = action;
-      if (!action_type || !player_name || !start_time) {
-        continue;
-      }
-
-      const adjustedStartTime = subtractSeconds(start_time, CUT_BACK_SECONDS);
-
-      const clip = await cutClip(file_id, adjustedStartTime, CLIP_DURATION_SECONDS, {
-        action_type,
-        player_name,
-        match_id
-      });
-
-      results.push(clip);
-    }
-
-    res.status(200).json({ success: true, clips: results });
-  } catch (error) {
-    console.error('🔥 Error in /auto-generate-clips:', error.message);
-    res.status(500).json({ success: false, error: 'Internal Server Error' });
-  }
-});
-
-// ✅ Endpoint קבלת קליפים לפי match_id
+// ✅ שליפת קליפים לפי match_id
 app.get('/clips', async (req, res) => {
   try {
     const { match_id } = req.query;
@@ -225,7 +155,7 @@ app.get('/clips', async (req, res) => {
           name: file.name,
           view_url: file.webViewLink,
           download_url: file.webContentLink,
-          thumbnail_url: '', // אין לנו תמונה כרגע
+          thumbnail_url: '',
           duration: 8,
           created_date: file.createdTime,
           player_id: 'manual',
