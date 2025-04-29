@@ -40,7 +40,7 @@ async function cutClip(fileId, startTime, duration, extraMetadata = {}) {
 
   const metadata = {
     clip_id: timestamp.toString(),
-    match_id: 'manual_test',
+    match_id: extraMetadata.match_id || 'manual_test',
     created_date: new Date().toISOString(),
     duration: duration,
     player_id: 'manual',
