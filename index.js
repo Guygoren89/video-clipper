@@ -9,7 +9,7 @@ const path = require('path');
 const multer = require('multer');
 const cors = require('cors');
 const { uploadToDrive, downloadFileFromDrive } = require('./driveUploader');
-const { cutClip } = require('./clipTester'); // ✅ ייבוא פונקציה מעודכנת
+const { cutClip } = require('./clipTester');
 const { google } = require('googleapis');
 
 const app = express();
@@ -22,6 +22,8 @@ const upload = multer({ storage: multer.memoryStorage() });
 const SCOPES = ['https://www.googleapis.com/auth/drive'];
 const auth = new google.auth.GoogleAuth({ scopes: SCOPES });
 const drive = google.drive({ version: 'v3', auth });
+
+const CLIPS_FOLDER_ID = '1onJ7niZb1PE1UBvDu2yBuiW1ZCzADv2C'; // Short_clips
 
 // ✅ Endpoint להעלאת מקטע
 app.post('/upload-segment', upload.single('file'), async (req, res) => {
@@ -84,7 +86,7 @@ app.post('/merge-segments', async (req, res) => {
     console.log(`🧩 Starting merge for match_id: ${match_id}`);
 
     const response = await drive.files.list({
-      q: `'1onJ7niZb1PE1UBvDu2yBuiW1ZCzADv2C' in parents and trashed = false and name contains '${match_id}'`,
+      q: `'${CLIPS_FOLDER_ID}' in parents and trashed = false and name contains '${match_id}'`,
       fields: 'files(id, name, createdTime)',
       orderBy: 'createdTime asc',
     });
@@ -189,6 +191,53 @@ app.post('/auto-generate-clips', async (req, res) => {
     res.status(200).json({ success: true, clips: results });
   } catch (error) {
     console.error('🔥 Error in /auto-generate-clips:', error.message);
+    res.status(500).json({ success: false, error: 'Internal Server Error' });
+  }
+});
+
+// ✅ Endpoint קבלת קליפים לפי match_id
+app.get('/clips', async (req, res) => {
+  try {
+    const { match_id } = req.query;
+    if (!match_id) {
+      return res.status(400).json({ success: false, error: 'Missing match_id parameter' });
+    }
+
+    const response = await drive.files.list({
+      q: `'${CLIPS_FOLDER_ID}' in parents and trashed = false`,
+      fields: 'files(id, name, createdTime, webViewLink, webContentLink)',
+      orderBy: 'createdTime desc',
+      pageSize: 1000,
+    });
+
+    const files = response.data.files || [];
+
+    const filteredClips = files
+      .filter(file => file.name.includes(match_id))
+      .map(file => {
+        const parts = file.name.split('_');
+        const actionType = parts[0] || 'unknown';
+        const playerName = parts[1] || 'unknown';
+        const clipId = file.id;
+
+        return {
+          external_id: clipId,
+          name: file.name,
+          view_url: file.webViewLink,
+          download_url: file.webContentLink,
+          thumbnail_url: '', // אין לנו תמונה כרגע
+          duration: 8,
+          created_date: file.createdTime,
+          player_id: 'manual',
+          player_name: playerName,
+          action_type: actionType,
+          match_id: match_id,
+        };
+      });
+
+    res.status(200).json({ success: true, clips: filteredClips });
+  } catch (error) {
+    console.error('🔥 Error in GET /clips:', error.message);
     res.status(500).json({ success: false, error: 'Internal Server Error' });
   }
 });
