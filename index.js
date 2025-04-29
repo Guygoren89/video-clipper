@@ -1,3 +1,5 @@
+// index.js
+
 const express = require('express');
 const { v4: uuidv4 } = require('uuid');
 const axios = require('axios');
@@ -7,6 +9,7 @@ const path = require('path');
 const multer = require('multer');
 const cors = require('cors');
 const { uploadToDrive, downloadFileFromDrive } = require('./driveUploader');
+const { cutClip } = require('./clipTester'); // ✅ ייבוא פונקציה חדשה
 const { google } = require('googleapis');
 
 const app = express();
@@ -57,7 +60,7 @@ app.post('/upload-segment', upload.single('file'), async (req, res) => {
         player_id: 'segment_mode',
         player_name: 'מקטע בדיקה',
         action_type: 'segment_upload',
-        custom_name: `segment_${match_id}_${Date.now()}.mp4` // ✅ הוספת שם קובץ מותאם אישית
+        custom_name: `segment_${match_id}_${Date.now()}.mp4`
       },
     });
 
@@ -71,7 +74,7 @@ app.post('/upload-segment', upload.single('file'), async (req, res) => {
   }
 });
 
-// ✅ Endpoint חדש לחיבור מקטעים
+// ✅ Endpoint לחיבור מקטעים
 app.post('/merge-segments', async (req, res) => {
   try {
     const { match_id } = req.body;
@@ -134,6 +137,22 @@ app.post('/merge-segments', async (req, res) => {
     res.status(200).json({ success: true, merged_video: driveRes });
   } catch (error) {
     console.error('🔥 Error in /merge-segments:', error.message);
+    res.status(500).json({ success: false, error: 'Internal Server Error' });
+  }
+});
+
+// ✅ Endpoint חדש: חיתוך מתוך סרטון קיים בדרייב
+app.post('/cut-test-clip', async (req, res) => {
+  try {
+    const { file_id, start_time, duration } = req.body;
+    if (!file_id || !start_time || !duration) {
+      return res.status(400).json({ success: false, error: 'Missing parameters' });
+    }
+
+    const clip = await cutClip(file_id, start_time, duration);
+    res.status(200).json({ success: true, clip });
+  } catch (error) {
+    console.error('🔥 Error in /cut-test-clip:', error.message);
     res.status(500).json({ success: false, error: 'Internal Server Error' });
   }
 });
