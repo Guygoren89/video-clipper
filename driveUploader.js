@@ -10,9 +10,9 @@ const drive = google.drive({ version: 'v3', auth });
 
 const CLIPS_FOLDER_ID = '1onJ7niZb1PE1UBvDu2yBuiW1ZCzADv2C';
 
-async function uploadToDrive({ filePath, metadata }) {
+async function uploadToDrive({ filePath, metadata, custom_name = null }) {
   const fileMetadata = {
-    name: `${metadata.match_id}_${path.basename(filePath)}`,
+    name: custom_name ? custom_name : `${metadata.match_id}_${path.basename(filePath)}`,
     parents: [CLIPS_FOLDER_ID],
   };
 
@@ -42,7 +42,7 @@ async function uploadToDrive({ filePath, metadata }) {
 
   return {
     external_id: metadata.clip_id,
-    name: metadata.player_name,
+    name: fileMetadata.name,
     view_url: viewUrl,
     download_url: downloadUrl,
     thumbnail_url: '',
