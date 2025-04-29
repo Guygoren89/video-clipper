@@ -56,7 +56,8 @@ app.post('/upload-segment', upload.single('file'), async (req, res) => {
         duration,
         player_id: 'segment_mode',
         player_name: 'מקטע בדיקה',
-        action_type: 'segment_upload'
+        action_type: 'segment_upload',
+        custom_name: `segment_${match_id}_${Date.now()}.mp4` // ✅ הוספת שם קובץ מותאם אישית
       },
     });
 
