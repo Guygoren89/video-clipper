@@ -9,7 +9,7 @@ const path = require('path');
 const multer = require('multer');
 const cors = require('cors');
 const { uploadToDrive, downloadFileFromDrive } = require('./driveUploader');
-const { cutClip } = require('./clipTester'); // ✅ ייבוא פונקציה חדשה
+const { cutClip } = require('./clipTester'); // ✅ ייבוא פונקציה מעודכנת
 const { google } = require('googleapis');
 
 const app = express();
@@ -140,15 +140,15 @@ app.post('/merge-segments', async (req, res) => {
   }
 });
 
-// ✅ Endpoint חדש: חיתוך מתוך סרטון קיים בדרייב (בודד)
+// ✅ Endpoint חיתוך בודד
 app.post('/cut-test-clip', async (req, res) => {
   try {
-    const { file_id, start_time, duration, action_type = 'manual_cut', player_name = 'unknown_player' } = req.body;
+    const { file_id, start_time, duration, action_type = 'manual_cut', player_name = 'unknown_player', match_id = 'manual_test' } = req.body;
     if (!file_id || !start_time || !duration) {
       return res.status(400).json({ success: false, error: 'Missing parameters' });
     }
 
-    const clip = await cutClip(file_id, start_time, duration, { action_type, player_name });
+    const clip = await cutClip(file_id, start_time, duration, { action_type, player_name, match_id });
     res.status(200).json({ success: true, clip });
   } catch (error) {
     console.error('🔥 Error in /cut-test-clip:', error.message);
@@ -156,14 +156,14 @@ app.post('/cut-test-clip', async (req, res) => {
   }
 });
 
-// ✅ Endpoint חדש: חיתוך אוטומטי מרשימת פעולות
+// ✅ Endpoint אוטומטי חכם
 const CUT_BACK_SECONDS = 8;
 const CLIP_DURATION_SECONDS = 8;
 
 app.post('/auto-generate-clips', async (req, res) => {
   try {
-    const { file_id, actions } = req.body;
-    if (!file_id || !Array.isArray(actions) || actions.length === 0) {
+    const { file_id, actions, match_id } = req.body;
+    if (!file_id || !Array.isArray(actions) || actions.length === 0 || !match_id) {
       return res.status(400).json({ success: false, error: 'Missing parameters' });
     }
 
@@ -179,7 +179,8 @@ app.post('/auto-generate-clips', async (req, res) => {
 
       const clip = await cutClip(file_id, adjustedStartTime, CLIP_DURATION_SECONDS, {
         action_type,
-        player_name
+        player_name,
+        match_id
       });
 
       results.push(clip);
@@ -192,7 +193,7 @@ app.post('/auto-generate-clips', async (req, res) => {
   }
 });
 
-// עזר: פונקציה להוריד שניות
+// עזר
 function subtractSeconds(timeStr, seconds) {
   const [hh, mm, ss] = timeStr.split(':').map(Number);
   let totalSeconds = hh * 3600 + mm * 60 + ss;
