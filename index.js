@@ -7,7 +7,7 @@ const path = require('path');
 const multer = require('multer');
 const cors = require('cors');
 const { uploadToDrive, generateThumbnail, listClipsFromDrive } = require('./driveUploader');
-const { google } = require('googleapis');
+const { addSegment, getSegments, clearSegments } = require('./segmentsManager');
 
 const app = express();
 app.use(cors());
@@ -16,122 +16,111 @@ app.use(express.json());
 const PORT = process.env.PORT || 10000;
 const upload = multer({ dest: '/tmp' });
 
-const SCOPES = ['https://www.googleapis.com/auth/drive'];
-const auth = new google.auth.GoogleAuth({
-  scopes: SCOPES,
-});
-const drive = google.drive({ version: 'v3', auth });
-
-app.post('/upload-full-game', upload.single('file'), async (req, res) => {
+app.post('/upload-segment', upload.single('file'), async (req, res) => {
   try {
     if (!req.file) {
       return res.status(400).json({ success: false, error: 'No file uploaded' });
     }
 
     const { path: filePath, originalname } = req.file;
+    const { match_id, start_time, duration } = req.body;
 
-    const fileMetadata = {
-      name: originalname,
-      parents: ['1vu6elArxj6YKLZePXjoqp_UFrDiI5ZOC']
-    };
+    if (!match_id || !start_time || !duration) {
+      return res.status(400).json({ success: false, error: 'Missing required fields' });
+    }
 
-    const media = {
-      mimeType: 'video/mp4',
-      body: fs.createReadStream(filePath),
-    };
-
-    const driveResponse = await drive.files.create({
-      requestBody: fileMetadata,
-      media,
-      fields: 'id, webViewLink',
+    addSegment(match_id, {
+      filePath,
+      originalName: originalname,
+      startTime: parseFloat(start_time),
+      duration: parseFloat(duration),
     });
 
-    const fileId = driveResponse.data.id;
+    console.log(`✅ Segment received for match ${match_id}: ${originalname}, start ${start_time}s, duration ${duration}s`);
 
-    await drive.permissions.create({
-      fileId,
-      requestBody: {
-        role: 'reader',
-        type: 'anyone',
-      },
-    });
-
-    const viewUrl = `https://drive.google.com/file/d/${fileId}/view`;
-
-    fs.unlinkSync(filePath);
-
-    res.status(200).json({ success: true, view_url: viewUrl });
+    res.status(200).json({ success: true });
   } catch (error) {
-    console.error('🔥 Failed to upload full game:', error.message);
-    res.status(500).json({ success: false, error: 'Failed to upload full game' });
+    console.error('🔥 Failed to upload segment:', error.message);
+    res.status(500).json({ success: false, error: 'Failed to upload segment' });
   }
 });
 
 app.post('/generate-clips', async (req, res) => {
-  const { videoUrl, actions } = req.body;
+  const { actions, match_id } = req.body;
   console.log('🎬 Received /generate-clips request:', JSON.stringify(req.body, null, 2));
 
-  const tempInputPath = `/tmp/input_${uuidv4()}.mp4`;
-
   try {
-    const video = await axios.get(videoUrl, { responseType: 'stream' });
-    const writer = fs.createWriteStream(tempInputPath);
-
-    await new Promise((resolve, reject) => {
-      video.data.pipe(writer);
-      writer.on('finish', resolve);
-      writer.on('error', reject);
-    });
-
-    const stats = fs.statSync(tempInputPath);
-    console.log(`✅ Full video downloaded: ${tempInputPath}, size: ${stats.size} bytes`);
+    const segments = getSegments(match_id);
+    if (segments.length === 0) {
+      return res.status(400).json({ success: false, error: 'No segments found for this match' });
+    }
 
     for (const action of actions) {
       const { timestamp, duration, player_id, player_name, action_type, match_id } = action;
       const clipId = uuidv4();
       const clipPath = `/tmp/clip_${clipId}.mp4`;
-      const start = Math.max(0, timestamp - 9);
 
-      console.log(`\n🎞️ Creating clip: start=${start}, duration=${duration}, player=${player_name}`);
+      const start = Math.max(0, timestamp - 6); // מתחילים 6 שניות אחורה מהפעולה
 
-      const ffmpegCmd = `ffmpeg -ss ${start} -i ${tempInputPath} -y -t ${duration} ${clipPath}`;
-      console.log(`🔧 FFmpeg started: ${ffmpegCmd}`);
+      // מוצאים אילו מקטעים רלוונטיים
+      const relevantSegments = segments.filter(seg =>
+        seg.startTime <= start + duration && (seg.startTime + seg.duration) >= start
+      );
 
-      try {
-        await new Promise((resolve, reject) => {
-          exec(ffmpegCmd, (error, stdout, stderr) => {
-            if (error) {
-              console.error(`❌ FFmpeg error for ${player_name}:`, error.message);
-              reject(error);
-            } else {
-              resolve();
-            }
-          });
-        });
-
-        const thumbnailPath = await generateThumbnail(clipPath);
-        const clipDriveData = await uploadToDrive({
-          filePath: clipPath,
-          thumbnailPath,
-          metadata: {
-            clip_id: clipId,
-            player_id,
-            player_name,
-            action_type,
-            match_id,
-            created_date: new Date().toISOString(),
-            duration,
-          },
-        });
-
-        console.log(`✅ Clip uploaded: ${clipDriveData.view_url}\n`);
-      } catch (clipError) {
-        console.error(`⚠️ Failed to process clip for ${player_name}:`, clipError.message);
+      if (relevantSegments.length === 0) {
+        console.error(`⚠️ No relevant segments found for action at ${start}s`);
+        continue;
       }
+
+      console.log(`🎞️ Creating clip for player ${player_name}, using ${relevantSegments.length} segment(s)`);
+
+      // בונים את פקודת ה-ffmpeg בהתאם
+      const inputListPath = `/tmp/input_list_${clipId}.txt`;
+      const fileList = relevantSegments.map(seg => `file '${seg.filePath}'`).join('\n');
+      fs.writeFileSync(inputListPath, fileList);
+
+      const concatOutput = `/tmp/concat_${clipId}.mp4`;
+      await new Promise((resolve, reject) => {
+        exec(`ffmpeg -f concat -safe 0 -i ${inputListPath} -c copy ${concatOutput}`, (error) => {
+          if (error) {
+            return reject(error);
+          }
+          resolve();
+        });
+      });
+
+      const ffmpegCmd = `ffmpeg -ss ${start} -i ${concatOutput} -y -t ${duration} ${clipPath}`;
+      console.log(`🔧 FFmpeg cutting clip: ${ffmpegCmd}`);
+
+      await new Promise((resolve, reject) => {
+        exec(ffmpegCmd, (error) => {
+          if (error) {
+            return reject(error);
+          }
+          resolve();
+        });
+      });
+
+      const thumbnailPath = await generateThumbnail(clipPath);
+      const clipDriveData = await uploadToDrive({
+        filePath: clipPath,
+        thumbnailPath,
+        metadata: {
+          clip_id: clipId,
+          player_id,
+          player_name,
+          action_type,
+          match_id,
+          created_date: new Date().toISOString(),
+          duration,
+        },
+      });
+
+      console.log(`✅ Clip uploaded: ${clipDriveData.view_url}`);
     }
 
-    fs.unlinkSync(tempInputPath);
-    console.log('🧹 Cleaned up input video');
+    clearSegments(match_id);
+    console.log('🧹 Cleaned up segments after clip generation');
 
     res.status(200).json({ success: true, message: 'All clips processed.' });
   } catch (error) {
