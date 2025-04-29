@@ -1,11 +1,76 @@
-const { downloadFileFromDrive } = require('./driveUploader');
+const express = require('express');
+const { v4: uuidv4 } = require('uuid');
+const axios = require('axios');
+const fs = require('fs');
 const { exec } = require('child_process');
+const path = require('path');
+const multer = require('multer');
+const cors = require('cors');
+const { uploadToDrive, downloadFileFromDrive } = require('./driveUploader');
 const { google } = require('googleapis');
 
-// קיים כבר
+const app = express();
+app.use(cors());
+app.use(express.json());
+
+const PORT = process.env.PORT || 10000;
+const upload = multer({ storage: multer.memoryStorage() });
+
+const SCOPES = ['https://www.googleapis.com/auth/drive'];
+const auth = new google.auth.GoogleAuth({ scopes: SCOPES });
 const drive = google.drive({ version: 'v3', auth });
 
-// ✅ API חדש: חיבור מקטעים
+// ✅ Endpoint להעלאת מקטע
+app.post('/upload-segment', upload.single('file'), async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ success: false, error: 'No file uploaded' });
+    }
+
+    const { match_id, start_time, duration } = req.body;
+    const segmentId = uuidv4();
+
+    const inputPath = `/tmp/input_${segmentId}.mp4`;
+    fs.writeFileSync(inputPath, req.file.buffer);
+
+    const clipPath = `/tmp/segment_${segmentId}.mp4`;
+    const ffmpegCmd = `ffmpeg -ss ${start_time} -i ${inputPath} -t ${duration} -y ${clipPath}`;
+    console.log(`🎞️ FFmpeg cutting segment: ${ffmpegCmd}`);
+
+    await new Promise((resolve, reject) => {
+      exec(ffmpegCmd, (error) => {
+        if (error) {
+          console.error('❌ FFmpeg failed:', error.message);
+          return reject(error);
+        }
+        resolve();
+      });
+    });
+
+    const driveRes = await uploadToDrive({
+      filePath: clipPath,
+      metadata: {
+        clip_id: segmentId,
+        match_id,
+        created_date: new Date().toISOString(),
+        duration,
+        player_id: 'segment_mode',
+        player_name: 'מקטע בדיקה',
+        action_type: 'segment_upload'
+      },
+    });
+
+    fs.unlinkSync(inputPath);
+    fs.unlinkSync(clipPath);
+
+    res.status(200).json({ success: true, clip: driveRes });
+  } catch (error) {
+    console.error('🔥 Error in /upload-segment:', error.message);
+    res.status(500).json({ success: false, error: 'Internal Server Error' });
+  }
+});
+
+// ✅ Endpoint חדש לחיבור מקטעים
 app.post('/merge-segments', async (req, res) => {
   try {
     const { match_id } = req.body;
@@ -15,7 +80,6 @@ app.post('/merge-segments', async (req, res) => {
 
     console.log(`🧩 Starting merge for match_id: ${match_id}`);
 
-    // 1. שליפת הקבצים המתאימים
     const response = await drive.files.list({
       q: `'1onJ7niZb1PE1UBvDu2yBuiW1ZCzADv2C' in parents and trashed = false and name contains '${match_id}'`,
       fields: 'files(id, name, createdTime)',
@@ -29,7 +93,6 @@ app.post('/merge-segments', async (req, res) => {
 
     console.log(`📂 Found ${files.length} segments`);
 
-    // 2. הורדה לשרת
     const inputPaths = [];
     for (const file of files) {
       const filePath = `/tmp/${file.name}`;
@@ -37,11 +100,9 @@ app.post('/merge-segments', async (req, res) => {
       inputPaths.push(filePath);
     }
 
-    // 3. הכנת קובץ טקסט ל־ffmpeg
     const listPath = '/tmp/segments.txt';
     fs.writeFileSync(listPath, inputPaths.map(p => `file '${p}'`).join('\n'));
 
-    // 4. איחוד מקטעים
     const mergedPath = `/tmp/merged_${uuidv4()}.mp4`;
     const ffmpegCmd = `ffmpeg -f concat -safe 0 -i ${listPath} -c copy -y ${mergedPath}`;
     console.log(`🔧 Running FFmpeg merge: ${ffmpegCmd}`);
@@ -56,7 +117,6 @@ app.post('/merge-segments', async (req, res) => {
       });
     });
 
-    // 5. העלאה לדרייב
     const driveRes = await uploadToDrive({
       filePath: mergedPath,
       metadata: {
@@ -66,14 +126,17 @@ app.post('/merge-segments', async (req, res) => {
         player_name: 'משחק מחובר',
         action_type: 'merged_video',
         created_date: new Date().toISOString(),
-        duration: '', // לא חובה כאן
+        duration: '',
       },
     });
 
     res.status(200).json({ success: true, merged_video: driveRes });
-
   } catch (error) {
     console.error('🔥 Error in /merge-segments:', error.message);
     res.status(500).json({ success: false, error: 'Internal Server Error' });
   }
+});
+
+app.listen(PORT, () => {
+  console.log(`🚀 Video Clipper running on port ${PORT}`);
 });
