@@ -26,18 +26,18 @@ const CLIP_DURATION_SECONDS = 8;
 
 // ✅ Endpoint להעלאת מקטע (20 שניות) לתיקיית Full_clips
 app.post('/upload-segment', upload.single('file'), async (req, res) => {
+  const segmentId = uuidv4();
+  const inputPath = `/tmp/input_${segmentId}.mp4`;
+  const clipPath = `/tmp/segment_${segmentId}.mp4`;
+
   try {
     if (!req.file) {
       return res.status(400).json({ success: false, error: 'No file uploaded' });
     }
 
     const { match_id, start_time, duration } = req.body;
-    const segmentId = uuidv4();
-
-    const inputPath = `/tmp/input_${segmentId}.mp4`;
     fs.writeFileSync(inputPath, req.file.buffer);
 
-    const clipPath = `/tmp/segment_${segmentId}.mp4`;
     const ffmpegCmd = `ffmpeg -ss ${start_time} -i ${inputPath} -t ${duration} -y ${clipPath}`;
     console.log(`🎞️ FFmpeg cutting segment: ${ffmpegCmd}`);
 
@@ -51,6 +51,7 @@ app.post('/upload-segment', upload.single('file'), async (req, res) => {
       });
     });
 
+    console.log("✅ Uploading to Google Drive...");
     const driveRes = await uploadToDrive({
       filePath: clipPath,
       metadata: {
@@ -62,8 +63,9 @@ app.post('/upload-segment', upload.single('file'), async (req, res) => {
         player_name: 'מקטע בדיקה',
         action_type: 'segment_upload',
       },
-      folderId: FULL_FOLDER_ID, // ✅ שמירה בתיקייה של מקטעים מלאים
+      folderId: FULL_FOLDER_ID,
     });
+    console.log("✅ Upload success:", driveRes.view_url);
 
     fs.unlinkSync(inputPath);
     fs.unlinkSync(clipPath);
@@ -71,11 +73,18 @@ app.post('/upload-segment', upload.single('file'), async (req, res) => {
     res.status(200).json({ success: true, clip: driveRes });
   } catch (error) {
     console.error('🔥 Error in /upload-segment:', error.message);
-    res.status(500).json({ success: false, error: 'Internal Server Error' });
+    try {
+      if (fs.existsSync(inputPath)) fs.unlinkSync(inputPath);
+      if (fs.existsSync(clipPath)) fs.unlinkSync(clipPath);
+    } catch (cleanupError) {
+      console.warn('⚠️ Failed to clean temp files:', cleanupError.message);
+    }
+
+    res.status(500).json({ success: false, error: 'Upload failed', details: error.message });
   }
 });
 
-// ✅ Endpoint לחיתוך קליפים לפי פעולות – כל פעולה מקבלת file_id נפרד
+// ✅ Endpoint לחיתוך קליפים לפי פעולות
 app.post('/auto-generate-from-segments', async (req, res) => {
   try {
     const { clips } = req.body;
@@ -84,7 +93,6 @@ app.post('/auto-generate-from-segments', async (req, res) => {
     }
 
     const results = [];
-
     for (const clip of clips) {
       const { file_id, start_time, action_type, player_name, match_id } = clip;
       if (!file_id || !start_time || !action_type || !player_name || !match_id) {
@@ -92,7 +100,6 @@ app.post('/auto-generate-from-segments', async (req, res) => {
       }
 
       const adjustedStartTime = subtractSeconds(start_time, CUT_BACK_SECONDS);
-
       const result = await cutClip(file_id, adjustedStartTime, CLIP_DURATION_SECONDS, {
         action_type,
         player_name,
