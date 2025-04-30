@@ -15,10 +15,10 @@ const PORT = process.env.PORT || 10000;
 const upload = multer({ storage: multer.memoryStorage() });
 
 app.post('/upload-segment', upload.single('file'), async (req, res) => {
-  console.log("\uD83D\uDCC5 התחיל תהליך /upload-segment");
+  console.log("📅 התחיל תהליך /upload-segment");
 
   // אבחון הקובץ שהתקבל
-  console.log("\uD83D\uDCC5 קובץ התקבל מהלקוח:");
+  console.log("📅 קובץ התקבל מהלקוח:");
   if (!req.file) {
     console.error("❌ לא התקבל קובץ כלל");
     return res.status(400).json({ success: false, error: 'לא התקבל קובץ' });
@@ -33,7 +33,7 @@ app.post('/upload-segment', upload.single('file'), async (req, res) => {
 
   const debugPath = `/tmp/debug_${Date.now()}.mp4`;
   fs.writeFileSync(debugPath, req.file.buffer);
-  console.log(`\uD83E\uDDEA נשמר עותק לבדיקה ב: ${debugPath}`);
+  console.log(`🧪 נשמר עותק לבדיקה ב: ${debugPath}`);
 
   try {
     const { match_id = 'test_upload', start_time = '00:00:00', duration = '00:00:12' } = req.body;
@@ -46,11 +46,12 @@ app.post('/upload-segment', upload.single('file'), async (req, res) => {
     console.log(`✅ File received. Starting FFmpeg cut...`);
 
     const ffmpegCmd = `ffmpeg -ss ${start_time} -i ${inputPath} -t ${duration} -y ${outputPath}`;
-    console.log("\uD83C\uDF9E️ FFmpeg command:", ffmpegCmd);
+    console.log("🎞️ FFmpeg command:", ffmpegCmd);
 
-    exec(ffmpegCmd, async (error) => {
+    exec(ffmpegCmd, async (error, stdout, stderr) => {
       if (error) {
         console.error("❌ FFmpeg failed:", error.message);
+        console.error("🧾 stderr:", stderr);
         return res.status(500).json({ success: false, error: 'FFmpeg failed' });
       }
 
@@ -59,10 +60,10 @@ app.post('/upload-segment', upload.single('file'), async (req, res) => {
         return res.status(500).json({ success: false, error: 'Output file missing' });
       }
 
-      console.log("\uD83D\uDCC6 FFmpeg finished. File ready:", outputPath);
+      console.log("📦 FFmpeg finished. File ready:", outputPath);
 
       try {
-        console.log("\uD83D\uDE80 Uploading to Google Drive...");
+        console.log("🚀 Uploading to Google Drive...");
         const driveRes = await uploadToDrive({
           filePath: outputPath,
           metadata: {
@@ -85,11 +86,11 @@ app.post('/upload-segment', upload.single('file'), async (req, res) => {
     });
 
   } catch (err) {
-    console.error("\uD83D\uDD25 Unexpected error:", err.message);
+    console.error("🔥 Unexpected error:", err.message);
     return res.status(500).json({ success: false, error: 'Unexpected Server Error' });
   }
 });
 
 app.listen(PORT, () => {
-  console.log(`\uD83D\uDE80 Video Clipper running on port ${PORT}`);
+  console.log(`🚀 Video Clipper running on port ${PORT}`);
 });
