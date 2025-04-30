@@ -31,7 +31,7 @@ app.post('/upload-segment', upload.single('file'), async (req, res) => {
     buffer_length: req.file.buffer.length
   });
 
-  const debugPath = `/tmp/debug_${Date.now()}.mp4`;
+  const debugPath = `/tmp/debug_${Date.now()}.webm`;
   fs.writeFileSync(debugPath, req.file.buffer);
   console.log(`🧪 נשמר עותק לבדיקה ב: ${debugPath}`);
 
@@ -39,13 +39,13 @@ app.post('/upload-segment', upload.single('file'), async (req, res) => {
     const { match_id = 'test_upload', start_time = '00:00:00', duration = '00:00:12' } = req.body;
     const segmentId = uuidv4();
 
-    const inputPath = `/tmp/input_${segmentId}.mp4`;
+    const inputPath = `/tmp/input_${segmentId}.webm`;
     const outputPath = `/tmp/segment_${segmentId}.mp4`;
 
     fs.writeFileSync(inputPath, req.file.buffer);
-    console.log(`✅ File received. Starting FFmpeg cut...`);
+    console.log(`✅ File received. Starting FFmpeg cut and convert...`);
 
-    const ffmpegCmd = `ffmpeg -ss ${start_time} -i ${inputPath} -t ${duration} -y ${outputPath}`;
+    const ffmpegCmd = `ffmpeg -ss ${start_time} -i ${inputPath} -t ${duration} -c:v libx264 -preset veryfast -pix_fmt yuv420p -y ${outputPath}`;
     console.log("🎞️ FFmpeg command:", ffmpegCmd);
 
     exec(ffmpegCmd, async (error, stdout, stderr) => {
