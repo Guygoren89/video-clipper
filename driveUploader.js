@@ -8,17 +8,17 @@ const auth = new google.auth.GoogleAuth({ scopes: SCOPES });
 const drive = google.drive({ version: 'v3', auth });
 
 const FOLDER_IDS = {
-  full: '1vu6elArxj6YKLZePXjoqp_UFrDiI5ZOC', // Full_clips
-  short: '1onJ7niZb1PE1UBvDu2yBuiW1ZCzADv2C' // Short_clips
+  full: '1vu6elArxj6YKLZePXjoqp_UFrDiI5ZOC',
+  short: '1onJ7niZb1PE1UBvDu2yBuiW1ZCzADv2C'
 };
 
 async function uploadToDrive({ filePath, metadata, custom_name = null }) {
   const isFullClip = metadata.action_type === 'segment_upload';
-  const targetFolder = isFullClip ? FOLDER_IDS.full : FOLDER_IDS.short;
+  const folderId = isFullClip ? FOLDER_IDS.full : FOLDER_IDS.short;
 
   const fileMetadata = {
-    name: custom_name ? custom_name : `${metadata.match_id}_${path.basename(filePath)}`,
-    parents: [targetFolder],
+    name: custom_name || `${metadata.match_id}_${path.basename(filePath)}`,
+    parents: [folderId],
   };
 
   const media = {
@@ -63,7 +63,6 @@ async function uploadToDrive({ filePath, metadata, custom_name = null }) {
 async function downloadFileFromDrive(fileId, destinationPath) {
   const dest = fs.createWriteStream(destinationPath);
   const res = await drive.files.get({ fileId, alt: 'media' }, { responseType: 'stream' });
-
   await new Promise((resolve, reject) => {
     res.data.pipe(dest);
     dest.on('finish', resolve);
@@ -71,13 +70,14 @@ async function downloadFileFromDrive(fileId, destinationPath) {
   });
 }
 
-async function listClipsFromDrive(folder = 'short') {
-  const folderId = FOLDER_IDS[folder];
+async function listClipsFromDrive(type = 'short') {
+  const folderId = type === 'full' ? FOLDER_IDS.full : FOLDER_IDS.short;
 
   const response = await drive.files.list({
     q: `'${folderId}' in parents and trashed = false`,
     fields: 'files(id, name, createdTime, webViewLink, webContentLink)',
     orderBy: 'createdTime desc',
+    pageSize: 1000,
   });
 
   return response.data.files.map(file => ({
@@ -93,5 +93,5 @@ async function listClipsFromDrive(folder = 'short') {
 module.exports = {
   uploadToDrive,
   downloadFileFromDrive,
-  listClipsFromDrive
+  listClipsFromDrive,
 };
