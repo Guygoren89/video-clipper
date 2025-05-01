@@ -34,7 +34,7 @@ app.post('/upload-segment', upload.single('file'), async (req, res) => {
   console.log(`🧪 עותק לבדיקה נשמר ב: ${debugPath}`);
 
   try {
-    const { match_id = 'test_upload', start_time = '00:00:00', duration = '00:00:12' } = req.body;
+    const { match_id = 'test_upload', start_time = '00:00:00', duration = '00:00:20' } = req.body;
     const segmentId = uuidv4();
 
     const inputPath = `/tmp/input_${segmentId}.webm`;
@@ -43,7 +43,6 @@ app.post('/upload-segment', upload.single('file'), async (req, res) => {
     fs.writeFileSync(inputPath, req.file.buffer);
     console.log(`✅ הקובץ נשמר. מתחיל חיתוך עם FFmpeg...`);
 
-    // 🟢 חיתוך מהיר ללא המרה
     const ffmpegCmd = `ffmpeg -ss ${start_time} -i ${inputPath} -t ${duration} -c copy -y ${outputPath}`;
     console.log("🎞️ FFmpeg command:", ffmpegCmd);
 
@@ -72,7 +71,7 @@ app.post('/upload-segment', upload.single('file'), async (req, res) => {
             duration,
             player_id: "manual",
             player_name: "Test Upload",
-            action_type: "manual_clip",
+            action_type: "segment_upload" // ✅ מוודא שמועלה ל-Full_clips
           }
         });
 
