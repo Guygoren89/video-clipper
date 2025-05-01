@@ -2,22 +2,27 @@ const fs = require('fs');
 const path = require('path');
 const { google } = require('googleapis');
 const { v4: uuidv4 } = require('uuid');
-const { exec } = require('child_process');
 
 const SCOPES = ['https://www.googleapis.com/auth/drive'];
 const auth = new google.auth.GoogleAuth({ scopes: SCOPES });
 const drive = google.drive({ version: 'v3', auth });
 
-const DEFAULT_CLIPS_FOLDER_ID = '1onJ7niZb1PE1UBvDu2yBuiW1ZCzADv2C'; // Short_clips
+const FOLDER_IDS = {
+  full: '1vu6elArxj6YKLZePXjoqp_UFrDiI5ZOC', // Full_clips
+  short: '1onJ7niZb1PE1UBvDu2yBuiW1ZCzADv2C' // Short_clips
+};
 
-async function uploadToDrive({ filePath, metadata, custom_name = null, folderId = DEFAULT_CLIPS_FOLDER_ID }) {
+async function uploadToDrive({ filePath, metadata, custom_name = null }) {
+  const isFullClip = metadata.action_type === 'segment_upload';
+  const targetFolder = isFullClip ? FOLDER_IDS.full : FOLDER_IDS.short;
+
   const fileMetadata = {
     name: custom_name ? custom_name : `${metadata.match_id}_${path.basename(filePath)}`,
-    parents: [folderId],
+    parents: [targetFolder],
   };
 
   const media = {
-    mimeType: 'video/mp4',
+    mimeType: 'video/webm',
     body: fs.createReadStream(filePath),
   };
 
@@ -55,19 +60,6 @@ async function uploadToDrive({ filePath, metadata, custom_name = null, folderId 
   };
 }
 
-async function generateThumbnail(videoPath) {
-  return new Promise((resolve, reject) => {
-    const thumbnailPath = `${videoPath.replace('.mp4', '')}_thumb.jpg`;
-    const cmd = `ffmpeg -i ${videoPath} -ss 00:00:01.000 -vframes 1 ${thumbnailPath}`;
-    exec(cmd, (error) => {
-      if (error) {
-        return reject(error);
-      }
-      resolve(thumbnailPath);
-    });
-  });
-}
-
 async function downloadFileFromDrive(fileId, destinationPath) {
   const dest = fs.createWriteStream(destinationPath);
   const res = await drive.files.get({ fileId, alt: 'media' }, { responseType: 'stream' });
@@ -79,10 +71,12 @@ async function downloadFileFromDrive(fileId, destinationPath) {
   });
 }
 
-async function listClipsFromDrive(folderId = DEFAULT_CLIPS_FOLDER_ID) {
+async function listClipsFromDrive(folder = 'short') {
+  const folderId = FOLDER_IDS[folder];
+
   const response = await drive.files.list({
     q: `'${folderId}' in parents and trashed = false`,
-    fields: 'files(id, name, createdTime, thumbnailLink, webViewLink, webContentLink)',
+    fields: 'files(id, name, createdTime, webViewLink, webContentLink)',
     orderBy: 'createdTime desc',
   });
 
@@ -91,14 +85,13 @@ async function listClipsFromDrive(folderId = DEFAULT_CLIPS_FOLDER_ID) {
     name: file.name,
     view_url: file.webViewLink,
     download_url: file.webContentLink,
-    thumbnail_url: file.thumbnailLink || '',
+    thumbnail_url: '',
     created_date: file.createdTime,
   }));
 }
 
 module.exports = {
   uploadToDrive,
-  generateThumbnail,
   downloadFileFromDrive,
   listClipsFromDrive
 };
