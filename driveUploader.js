@@ -13,8 +13,12 @@ const FOLDER_IDS = {
 };
 
 async function uploadToDrive({ filePath, metadata, custom_name = null }) {
-  const isFullClip = metadata.action_type === 'segment_upload';
+  const actionType = (metadata.action_type || '').toLowerCase().trim();
+  const isFullClip = actionType === 'segment_upload';
   const folderId = isFullClip ? FOLDER_IDS.full : FOLDER_IDS.short;
+
+  console.log(`📂 Uploading to folder: ${isFullClip ? 'Full_clips' : 'Short_clips'}`);
+  console.log(`📄 File name: ${custom_name || path.basename(filePath)}`);
 
   const fileMetadata = {
     name: custom_name || `${metadata.match_id}_${path.basename(filePath)}`,
