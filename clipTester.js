@@ -27,7 +27,6 @@ async function cutClip(fileId, startTime, duration = '00:00:08', extraMetadata =
 
   await downloadFile(fileId, inputPath);
 
-  // שימוש בזמן חיתוך כפי שהתקבל, ללא החסרה פנימית
   const ffmpegCommand = `ffmpeg -ss ${startTime} -i ${inputPath} -t ${duration} -c copy -y ${outputPath}`;
   await new Promise((resolve, reject) => {
     exec(ffmpegCommand, (error) => {
@@ -41,12 +40,10 @@ async function cutClip(fileId, startTime, duration = '00:00:08', extraMetadata =
     match_id: extraMetadata.match_id || 'manual_test',
     created_date: new Date().toISOString(),
     duration: duration,
-    player_id: 'manual',
-    player_name: extraMetadata.player_name || 'לא ידוע',
-    action_type: extraMetadata.action_type || 'unknown_action',
+    // ↓ לא כולל שחקן או פעולה – יתווסף בדיעבד
   };
 
-  const customFileName = `${metadata.action_type}_${metadata.player_name}_${metadata.match_id}_${metadata.clip_id}.webm`;
+  const customFileName = `clip_${metadata.match_id}_${metadata.clip_id}.webm`;
 
   const uploadedClip = await uploadToDrive({
     filePath: outputPath,
