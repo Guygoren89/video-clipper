@@ -2,7 +2,6 @@ const express = require('express');
 const bodyParser = require('body-parser');
 const { google } = require('googleapis');
 const fs = require('fs');
-const path = require('path');
 const { v4: uuidv4 } = require('uuid');
 const { exec } = require('child_process');
 const multer = require('multer');
@@ -13,7 +12,6 @@ const port = 10000;
 app.use(cors());
 app.use(bodyParser.json());
 
-// Multer for file upload
 const upload = multer({ dest: '/tmp' });
 
 // Google Drive Auth
@@ -22,18 +20,16 @@ const auth = new google.auth.GoogleAuth({
 });
 const drive = google.drive({ version: 'v3', auth });
 
-// Utils
+// Utilities
 function formatTime(seconds) {
   const hrs = Math.floor(seconds / 3600);
   const mins = Math.floor((seconds % 3600) / 60);
   const secs = Math.floor(seconds % 60);
   return `${pad(hrs)}:${pad(mins)}:${pad(secs)}`;
 }
-
 function pad(n) {
   return n.toString().padStart(2, '0');
 }
-
 function uploadToDrive(filePath, fileName, folderId) {
   return drive.files.create({
     requestBody: {
@@ -47,10 +43,9 @@ function uploadToDrive(filePath, fileName, folderId) {
   });
 }
 
-// 🌕 FULL SEGMENT UPLOAD
+// 🔁 Segment Upload
 app.post('/upload-segment', upload.single('file'), async (req, res) => {
   console.log('📅 התחיל תהליך /upload-segment');
-
   const inputPath = req.file.path;
   const segmentId = uuidv4();
   const segmentPath = `/tmp/segment_${segmentId}.webm`;
@@ -66,9 +61,7 @@ app.post('/upload-segment', upload.single('file'), async (req, res) => {
 
     const folderId = '1vu6elArxj6YKLZePXjoqp_UFrDiI5ZOC'; // Full_clips
     const fileName = `segment_${segmentId}.webm`;
-    console.log('📂 Uploading to folder:', 'Full_clips');
-    console.log('📄 File name:', fileName);
-
+    console.log('📂 Uploading to folder: Full_clips');
     try {
       const response = await uploadToDrive(segmentPath, fileName, folderId);
       const fileId = response.data.id;
@@ -78,8 +71,8 @@ app.post('/upload-segment', upload.single('file'), async (req, res) => {
       res.json({
         success: true,
         clip: {
-          google_file_id: fileId
-        }
+          google_file_id: fileId,
+        },
       });
     } catch (err) {
       console.error('❌ Upload error:', err.message);
@@ -91,20 +84,13 @@ app.post('/upload-segment', upload.single('file'), async (req, res) => {
   });
 });
 
-// ✂️ AUTO GENERATE SHORT CLIP
+// ✂️ Auto-generate clip
 app.post('/auto-generate-clips', async (req, res) => {
   console.log('📅 התחיל תהליך /auto-generate-clips');
 
   const { file_id, start_time } = req.body;
-
-  if (!file_id) {
-    console.error('❌ חסר file_id');
-    return res.status(400).json({ error: 'Missing file_id' });
-  }
-
-  if (typeof start_time !== 'number' || isNaN(start_time)) {
-    console.error('❌ start_time is missing or invalid:', start_time);
-    return res.status(400).json({ error: 'Invalid start_time' });
+  if (!file_id || typeof start_time !== 'number') {
+    return res.status(400).json({ error: 'Missing or invalid parameters' });
   }
 
   const inputPath = `/tmp/input_${Date.now()}.webm`;
@@ -112,7 +98,6 @@ app.post('/auto-generate-clips', async (req, res) => {
   const clipPath = `/tmp/${clipId}.webm`;
 
   try {
-    // Download full clip from Google Drive
     const dest = fs.createWriteStream(inputPath);
     await drive.files.get(
       { fileId: file_id, alt: 'media' },
@@ -122,15 +107,12 @@ app.post('/auto-generate-clips', async (req, res) => {
         res2.data.pipe(dest);
       }
     );
-
     await new Promise((resolve) => dest.on('finish', resolve));
 
-    // Calculate start timestamp
     const startTime = formatTime(start_time);
-    const clipCommand = `ffmpeg -ss ${startTime} -i ${inputPath} -t 00:00:08 -c copy -y ${clipPath}`;
+    const clipCommand = `ffmpeg -ss ${startTime} -i ${inputPath} -t 8 -c:v libvpx -crf 10 -b:v 1M -an -y ${clipPath}`;
     console.log('🎞️ FFmpeg command:', clipCommand);
 
-    // Run FFmpeg to generate clip
     await new Promise((resolve, reject) => {
       exec(clipCommand, (error) => {
         if (error) reject(error);
@@ -138,7 +120,6 @@ app.post('/auto-generate-clips', async (req, res) => {
       });
     });
 
-    // Upload short clip
     const folderId = '1onJ7niZb1PE1UBvDu2yBuiW1ZCzADv2C'; // Short_clips
     const response = await uploadToDrive(clipPath, `${clipId}.webm`, folderId);
     const fileUrl = `https://drive.google.com/file/d/${response.data.id}/view`;
