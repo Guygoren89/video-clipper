@@ -17,7 +17,9 @@ const upload = multer({ storage: multer.memoryStorage() });
 // שלב 1: העלאת סרטון מלא
 app.post('/upload-segment', upload.single('file'), async (req, res) => {
   console.log("📅 התחיל תהליך /upload-segment");
-  if (!req.file) return res.status(400).json({ success: false, error: 'לא התקבל קובץ' });
+  if (!req.file) {
+    return res.status(400).json({ success: false, error: 'לא התקבל קובץ' });
+  }
 
   const segmentId = uuidv4();
   const inputPath = `/tmp/input_${segmentId}.webm`;
@@ -27,10 +29,13 @@ app.post('/upload-segment', upload.single('file'), async (req, res) => {
   const { match_id = 'test_upload', start_time = '00:00:00', duration = '00:00:20' } = req.body;
   const ffmpegCmd = `ffmpeg -ss ${start_time} -i ${inputPath} -t ${duration} -c copy -y ${outputPath}`;
   console.log("🎞️ FFmpeg command:", ffmpegCmd);
-  res.status(200).json({ success: true, clip: { external_id: segmentId } });
 
   exec(ffmpegCmd, async (error) => {
-    if (error) return console.error("❌ FFmpeg נכשל:", error.message);
+    if (error) {
+      console.error("❌ FFmpeg נכשל:", error.message);
+      return res.status(500).json({ success: false, error: 'FFmpeg failed' });
+    }
+
     try {
       const driveRes = await uploadToDrive({
         filePath: outputPath,
@@ -42,9 +47,12 @@ app.post('/upload-segment', upload.single('file'), async (req, res) => {
           action_type: "segment_upload"
         }
       });
+
       console.log("✅ הועלה בהצלחה:", driveRes.view_url);
+      return res.status(200).json({ success: true, clip: driveRes });
     } catch (err) {
       console.error("🚨 שגיאה בהעלאה ל-Drive:", err.message);
+      return res.status(500).json({ success: false, error: 'Upload failed' });
     }
   });
 });
