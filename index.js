@@ -1,5 +1,23 @@
-// ... כל הייבואים כמו בקוד שלך
+// index.js
 
+const express = require('express');
+const { v4: uuidv4 } = require('uuid');
+const multer = require('multer');
+const cors = require('cors');
+const fs = require('fs');
+const path = require('path');
+const { exec } = require('child_process');
+const { uploadToDrive, listClipsFromDrive } = require('./driveUploader');
+const { cutClip } = require('./clipTester');
+
+// יצירת אפליקציה
+const app = express();
+const PORT = process.env.PORT || 10000;
+app.use(cors());
+app.use(express.json());
+const upload = multer({ storage: multer.memoryStorage() });
+
+// שלב 1: העלאת סרטון מלא לתיקיית Full_clips
 app.post('/upload-segment', upload.single('file'), async (req, res) => {
   console.log("📅 התחיל תהליך /upload-segment");
 
@@ -50,4 +68,61 @@ app.post('/upload-segment', upload.single('file'), async (req, res) => {
       console.error("🚨 שגיאה בהעלאה ל-Drive:", err.message);
     }
   });
+});
+
+// שלב 2: חיתוך קליפים אוטומטי לפי פעולות למשחק
+app.post('/auto-generate-clips', async (req, res) => {
+  try {
+    const { file_id, actions, match_id } = req.body;
+    if (!file_id || !Array.isArray(actions) || actions.length === 0 || !match_id) {
+      return res.status(400).json({ success: false, error: 'Missing parameters' });
+    }
+
+    const results = [];
+    for (const action of actions) {
+      const { action_type, player_name, start_time } = action;
+      if (!action_type || !player_name || !start_time) continue;
+
+      const adjustedStartTime = subtractSeconds(start_time, 8);
+      const clip = await cutClip(file_id, adjustedStartTime, 8, {
+        action_type,
+        player_name,
+        match_id
+      });
+      results.push(clip);
+    }
+
+    return res.status(200).json({ success: true, clips: results });
+  } catch (error) {
+    console.error("🔥 Error in /auto-generate-clips:", error.message);
+    return res.status(500).json({ success: false, error: 'Internal Server Error' });
+  }
+});
+
+// שלב 3: שליפה לפי match_id
+app.get('/clips', async (req, res) => {
+  const { match_id } = req.query;
+  if (!match_id) {
+    return res.status(400).json({ success: false, error: 'Missing match_id' });
+  }
+
+  const all = await listClipsFromDrive('short');
+  const filtered = all.filter(c => c.name.includes(match_id));
+  return res.status(200).json({ success: true, clips: filtered });
+});
+
+// עזר לחיתוך זמן אחורה
+function subtractSeconds(timeStr, seconds) {
+  const [hh, mm, ss] = timeStr.split(':').map(Number);
+  let totalSeconds = hh * 3600 + mm * 60 + ss - seconds;
+  if (totalSeconds < 0) totalSeconds = 0;
+  const h = String(Math.floor(totalSeconds / 3600)).padStart(2, '0');
+  const m = String(Math.floor((totalSeconds % 3600) / 60)).padStart(2, '0');
+  const s = String(totalSeconds % 60).padStart(2, '0');
+  return `${h}:${m}:${s}`;
+}
+
+// הפעלת השרת
+app.listen(PORT, () => {
+  console.log(`🚀 Video Clipper running on port ${PORT}`);
 });
