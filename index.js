@@ -1,131 +1,154 @@
 const express = require('express');
-const { v4: uuidv4 } = require('uuid');
-const multer = require('multer');
-const cors = require('cors');
+const bodyParser = require('body-parser');
+const { google } = require('googleapis');
 const fs = require('fs');
 const path = require('path');
+const { v4: uuidv4 } = require('uuid');
 const { exec } = require('child_process');
-const { uploadToDrive, listClipsFromDrive } = require('./driveUploader');
-const { cutClip } = require('./clipTester');
+const multer = require('multer');
+const cors = require('cors');
 
 const app = express();
-const PORT = process.env.PORT || 10000;
+const port = 10000;
 app.use(cors());
-app.use(express.json());
-const upload = multer({ storage: multer.memoryStorage() });
+app.use(bodyParser.json());
 
-// שלב 1: העלאת סרטון מלא
-app.post('/upload-segment', upload.single('file'), async (req, res) => {
-  console.log("📅 התחיל תהליך /upload-segment");
-  if (!req.file) {
-    return res.status(400).json({ success: false, error: 'לא התקבל קובץ' });
-  }
+// Multer for file upload
+const upload = multer({ dest: '/tmp' });
 
+// Google Drive Auth
+const auth = new google.auth.GoogleAuth({
+  scopes: ['https://www.googleapis.com/auth/drive'],
+});
+const drive = google.drive({ version: 'v3', auth });
+
+// Utils
+function formatTime(seconds) {
+  const hrs = Math.floor(seconds / 3600);
+  const mins = Math.floor((seconds % 3600) / 60);
+  const secs = Math.floor(seconds % 60);
+  return `${pad(hrs)}:${pad(mins)}:${pad(secs)}`;
+}
+
+function pad(n) {
+  return n.toString().padStart(2, '0');
+}
+
+function uploadToDrive(filePath, fileName, folderId) {
+  return drive.files.create({
+    requestBody: {
+      name: fileName,
+      parents: [folderId],
+    },
+    media: {
+      mimeType: 'video/webm',
+      body: fs.createReadStream(filePath),
+    },
+  });
+}
+
+// 🌕 FULL SEGMENT UPLOAD
+app.post('/upload-segment', upload.single('video'), async (req, res) => {
+  console.log('📅 התחיל תהליך /upload-segment');
+
+  const inputPath = req.file.path;
   const segmentId = uuidv4();
-  const inputPath = `/tmp/input_${segmentId}.webm`;
-  const outputPath = `/tmp/segment_${segmentId}.webm`;
-  fs.writeFileSync(inputPath, req.file.buffer);
+  const segmentPath = `/tmp/segment_${segmentId}.webm`;
 
-  const { match_id = 'test_upload', start_time = '00:00:00', duration = '00:00:20' } = req.body;
-  const ffmpegCmd = `ffmpeg -ss ${start_time} -i ${inputPath} -t ${duration} -c copy -y ${outputPath}`;
-  console.log("🎞️ FFmpeg command:", ffmpegCmd);
+  const ffmpegCommand = `ffmpeg -ss 00:00:00 -i ${inputPath} -t 00:00:20 -c copy -y ${segmentPath}`;
+  console.log('🎞️ FFmpeg command:', ffmpegCommand);
 
-  exec(ffmpegCmd, async (error) => {
+  exec(ffmpegCommand, async (error) => {
     if (error) {
-      console.error("❌ FFmpeg נכשל:", error.message);
-      return res.status(500).json({ success: false, error: 'FFmpeg failed' });
+      console.error('FFmpeg error:', error);
+      return res.status(500).json({ error: 'FFmpeg failed' });
     }
 
-    try {
-      const driveRes = await uploadToDrive({
-        filePath: outputPath,
-        metadata: {
-          clip_id: segmentId,
-          match_id,
-          created_date: new Date().toISOString(),
-          duration,
-          action_type: "segment_upload"
-        }
-      });
+    const folderId = '1vu6elArxj6YKLZePXjoqp_UFrDiI5ZOC'; // Full_clips
+    const fileName = `segment_${segmentId}.webm`;
+    console.log('📂 Uploading to folder:', 'Full_clips');
+    console.log('📄 File name:', fileName);
 
-      console.log("✅ הועלה בהצלחה:", driveRes.view_url);
-      return res.status(200).json({ success: true, clip: driveRes });
+    try {
+      const response = await uploadToDrive(segmentPath, fileName, folderId);
+      const fileId = response.data.id;
+      const fileUrl = `https://drive.google.com/file/d/${fileId}/view`;
+      console.log('✅ הועלה בהצלחה:', fileUrl);
+      res.json({ fileId, fileUrl });
     } catch (err) {
-      console.error("🚨 שגיאה בהעלאה ל-Drive:", err.message);
-      return res.status(500).json({ success: false, error: 'Upload failed' });
+      console.error('❌ Upload error:', err.message);
+      res.status(500).json({ error: 'Upload failed' });
+    } finally {
+      fs.unlinkSync(inputPath);
+      fs.unlinkSync(segmentPath);
     }
   });
 });
 
-// שלב 2: חיתוך אוטומטי (עובד גם בלי שחקן/קבוצה)
+// ✂️ AUTO GENERATE SHORT CLIP
 app.post('/auto-generate-clips', async (req, res) => {
-  try {
-    const { file_id, actions, match_id } = req.body;
-    if (!file_id || !Array.isArray(actions) || actions.length === 0 || !match_id) {
-      return res.status(400).json({ success: false, error: 'Missing parameters' });
-    }
+  console.log('📅 התחיל תהליך /auto-generate-clips');
 
-    const results = [];
-    for (const action of actions) {
-      const { start_time, action_type = 'unknown_action', player_name = 'לא ידוע' } = action;
-      if (!start_time) continue;
+  const { file_id, start_time } = req.body;
 
-      const adjustedStartTime = subtractSeconds(start_time, 8);
-      const clip = await cutClip(file_id, adjustedStartTime, '00:00:08', {
-        action_type,
-        player_name,
-        match_id
-      });
-      results.push(clip);
-    }
-
-    return res.status(200).json({ success: true, clips: results });
-  } catch (error) {
-    console.error("🔥 Error in /auto-generate-clips:", error.message);
-    return res.status(500).json({ success: false, error: 'Internal Server Error' });
+  if (!file_id) {
+    console.error('❌ חסר file_id');
+    return res.status(400).json({ error: 'Missing file_id' });
   }
-});
 
-// שלב 3: שליפת קליפים לפי match_id
-app.get('/clips', async (req, res) => {
-  const { match_id } = req.query;
-  if (!match_id) return res.status(400).json({ success: false, error: 'Missing match_id' });
-  const all = await listClipsFromDrive('short');
-  const filtered = all.filter(c => c.name.includes(match_id));
-  return res.status(200).json({ success: true, clips: filtered });
-});
+  if (typeof start_time !== 'number' || isNaN(start_time)) {
+    console.error('❌ start_time is missing or invalid:', start_time);
+    return res.status(400).json({ error: 'Invalid start_time' });
+  }
 
-// שלב 4: חיתוך ידני לפי פרמטרים
-app.post('/manual-cut', async (req, res) => {
+  const inputPath = `/tmp/input_${Date.now()}.webm`;
+  const clipId = `clip_${Date.now()}`;
+  const clipPath = `/tmp/${clipId}.webm`;
+  const driveUrl = `https://www.googleapis.com/drive/v3/files/${file_id}?alt=media`;
+
   try {
-    const { file_id, start_time, duration, action_type = 'unknown_action', player_name = 'לא ידוע', match_id } = req.body;
-    if (!file_id || !start_time || !duration || !match_id) {
-      return res.status(400).json({ success: false, error: 'Missing parameters' });
-    }
+    // Download full clip from Google Drive
+    const dest = fs.createWriteStream(inputPath);
+    await drive.files.get(
+      { fileId: file_id, alt: 'media' },
+      { responseType: 'stream' },
+      (err, res2) => {
+        if (err) throw err;
+        res2.data.pipe(dest);
+      }
+    );
 
-    const clip = await cutClip(file_id, start_time, duration, {
-      action_type,
-      player_name,
-      match_id
+    await new Promise((resolve) => dest.on('finish', resolve));
+
+    // Calculate start timestamp
+    const startTime = formatTime(start_time);
+    const clipCommand = `ffmpeg -ss ${startTime} -i ${inputPath} -t 00:00:08 -c copy -y ${clipPath}`;
+    console.log('🎞️ FFmpeg command:', clipCommand);
+
+    // Run FFmpeg to generate clip
+    await new Promise((resolve, reject) => {
+      exec(clipCommand, (error) => {
+        if (error) reject(error);
+        else resolve();
+      });
     });
 
-    return res.status(200).json({ success: true, clip });
-  } catch (error) {
-    console.error("🔥 Error in /manual-cut:", error.message);
-    return res.status(500).json({ success: false, error: 'Internal Server Error' });
+    // Upload short clip
+    const folderId = '1onJ7niZb1PE1UBvDu2yBuiW1ZCzADv2c'; // Short_clips
+    const response = await uploadToDrive(clipPath, `${clipId}.webm`, folderId);
+    const fileUrl = `https://drive.google.com/file/d/${response.data.id}/view`;
+
+    console.log('✅ קליפ קצר הועלה:', fileUrl);
+    res.json({ fileUrl });
+  } catch (err) {
+    console.error('🔥 Error in /auto-generate-clips:', err.message);
+    res.status(500).json({ error: err.message });
+  } finally {
+    if (fs.existsSync(inputPath)) fs.unlinkSync(inputPath);
+    if (fs.existsSync(clipPath)) fs.unlinkSync(clipPath);
   }
 });
 
-function subtractSeconds(timeStr, seconds) {
-  const [hh, mm, ss] = timeStr.split(':').map(Number);
-  let totalSeconds = hh * 3600 + mm * 60 + ss - seconds;
-  if (totalSeconds < 0) totalSeconds = 0;
-  const h = String(Math.floor(totalSeconds / 3600)).padStart(2, '0');
-  const m = String(Math.floor((totalSeconds % 3600) / 60)).padStart(2, '0');
-  const s = String(totalSeconds % 60).padStart(2, '0');
-  return `${h}:${m}:${s}`;
-}
-
-app.listen(PORT, () => {
-  console.log(`🚀 Video Clipper running on port ${PORT}`);
+app.listen(port, () => {
+  console.log(`🚀 Video Clipper running on port ${port}`);
 });
