@@ -1,5 +1,3 @@
-// index.js
-
 const express = require('express');
 const { v4: uuidv4 } = require('uuid');
 const multer = require('multer');
@@ -41,8 +39,6 @@ app.post('/upload-segment', upload.single('file'), async (req, res) => {
           match_id,
           created_date: new Date().toISOString(),
           duration,
-          player_id: "manual",
-          player_name: "Test Upload",
           action_type: "segment_upload"
         }
       });
@@ -53,7 +49,7 @@ app.post('/upload-segment', upload.single('file'), async (req, res) => {
   });
 });
 
-// שלב 2: חיתוך אוטומטי
+// שלב 2: חיתוך אוטומטי (עובד גם בלי שחקן/קבוצה)
 app.post('/auto-generate-clips', async (req, res) => {
   try {
     const { file_id, actions, match_id } = req.body;
@@ -63,8 +59,9 @@ app.post('/auto-generate-clips', async (req, res) => {
 
     const results = [];
     for (const action of actions) {
-      const { action_type, player_name, start_time } = action;
-      if (!action_type || !player_name || !start_time) continue;
+      const { start_time, action_type = 'unknown_action', player_name = 'לא ידוע' } = action;
+      if (!start_time) continue;
+
       const adjustedStartTime = subtractSeconds(start_time, 8);
       const clip = await cutClip(file_id, adjustedStartTime, '00:00:08', {
         action_type,
@@ -93,8 +90,8 @@ app.get('/clips', async (req, res) => {
 // שלב 4: חיתוך ידני לפי פרמטרים
 app.post('/manual-cut', async (req, res) => {
   try {
-    const { file_id, start_time, duration, action_type, player_name, match_id } = req.body;
-    if (!file_id || !start_time || !duration || !action_type || !player_name || !match_id) {
+    const { file_id, start_time, duration, action_type = 'unknown_action', player_name = 'לא ידוע', match_id } = req.body;
+    if (!file_id || !start_time || !duration || !match_id) {
       return res.status(400).json({ success: false, error: 'Missing parameters' });
     }
 
