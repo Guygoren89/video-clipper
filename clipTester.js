@@ -18,14 +18,27 @@ async function downloadFile(fileId, destPath) {
   });
 }
 
-async function cutClip(fileId, startTime, duration, extraMetadata = {}) {
+// עוזר להחסיר שניות ממחרוזת זמן
+function subtractSecondsFromTimestamp(timestamp, seconds) {
+  const [hh, mm, ss] = timestamp.split(':').map(Number);
+  let total = hh * 3600 + mm * 60 + ss;
+  total = Math.max(0, total - seconds);
+  const newH = String(Math.floor(total / 3600)).padStart(2, '0');
+  const newM = String(Math.floor((total % 3600) / 60)).padStart(2, '0');
+  const newS = String(total % 60).padStart(2, '0');
+  return `${newH}:${newM}:${newS}`;
+}
+
+async function cutClip(fileId, startTime, duration = '00:00:08', extraMetadata = {}) {
   const timestamp = Date.now();
   const inputPath = path.join(TEMP_FOLDER, `input_${timestamp}.webm`);
   const outputPath = path.join(TEMP_FOLDER, `clip_${timestamp}.webm`);
 
   await downloadFile(fileId, inputPath);
 
-  const ffmpegCommand = `ffmpeg -ss ${startTime} -i ${inputPath} -t ${duration} -c copy -y ${outputPath}`;
+  const startBefore = subtractSecondsFromTimestamp(startTime, 8);
+
+  const ffmpegCommand = `ffmpeg -ss ${startBefore} -i ${inputPath} -t ${duration} -c copy -y ${outputPath}`;
   await new Promise((resolve, reject) => {
     exec(ffmpegCommand, (error) => {
       if (error) reject(error);
