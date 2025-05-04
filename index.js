@@ -10,7 +10,6 @@ const { exec } = require('child_process');
 const { uploadToDrive, listClipsFromDrive } = require('./driveUploader');
 const { cutClip } = require('./clipTester');
 
-// יצירת אפליקציה
 const app = express();
 const PORT = process.env.PORT || 10000;
 app.use(cors());
@@ -39,10 +38,8 @@ app.post('/upload-segment', upload.single('file'), async (req, res) => {
   const ffmpegCmd = `ffmpeg -ss ${start_time} -i ${inputPath} -t ${duration} -c copy -y ${outputPath}`;
   console.log("🎞️ FFmpeg command:", ffmpegCmd);
 
-  // עונים מיד ללקוח כדי לא לחסום המשך הקלטה
   res.status(200).json({ success: true, clip: { external_id: segmentId } });
 
-  // מעבדים ומעלים ברקע
   exec(ffmpegCmd, async (error) => {
     if (error) {
       console.error("❌ FFmpeg נכשל:", error.message);
@@ -99,6 +96,28 @@ app.post('/auto-generate-clips', async (req, res) => {
   }
 });
 
+// שלב 2.5: חיתוך קליפ ידני לפי file_id ופרטים מהמשתמש
+app.post('/manual-cut', async (req, res) => {
+  try {
+    const { file_id, start_time, duration, action_type, player_name, match_id } = req.body;
+
+    if (!file_id || !start_time || !duration) {
+      return res.status(400).json({ success: false, error: 'Missing required parameters' });
+    }
+
+    const clip = await cutClip(file_id, start_time, duration, {
+      action_type: action_type || 'manual',
+      player_name: player_name || 'לא ידוע',
+      match_id: match_id || 'manual_cut'
+    });
+
+    return res.status(200).json({ success: true, clip });
+  } catch (error) {
+    console.error("🔥 Error in /manual-cut:", error.message);
+    return res.status(500).json({ success: false, error: 'Internal Server Error' });
+  }
+});
+
 // שלב 3: שליפה לפי match_id
 app.get('/clips', async (req, res) => {
   const { match_id } = req.query;
@@ -111,7 +130,6 @@ app.get('/clips', async (req, res) => {
   return res.status(200).json({ success: true, clips: filtered });
 });
 
-// עזר לחיתוך זמן אחורה
 function subtractSeconds(timeStr, seconds) {
   const [hh, mm, ss] = timeStr.split(':').map(Number);
   let totalSeconds = hh * 3600 + mm * 60 + ss - seconds;
@@ -122,7 +140,6 @@ function subtractSeconds(timeStr, seconds) {
   return `${h}:${m}:${s}`;
 }
 
-// הפעלת השרת
 app.listen(PORT, () => {
   console.log(`🚀 Video Clipper running on port ${PORT}`);
 });
