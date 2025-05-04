@@ -43,7 +43,7 @@ function uploadToDrive(filePath, fileName, folderId) {
   });
 }
 
-// 🔁 Segment Upload
+// 🔁 Segment Upload (20 sec full clips)
 app.post('/upload-segment', upload.single('file'), async (req, res) => {
   console.log('📅 התחיל תהליך /upload-segment');
   const inputPath = req.file.path;
@@ -84,7 +84,7 @@ app.post('/upload-segment', upload.single('file'), async (req, res) => {
   });
 });
 
-// ✂️ Auto-generate clip
+// ✂️ Auto-generate clips from action
 app.post('/auto-generate-clips', async (req, res) => {
   console.log('📅 התחיל תהליך /auto-generate-clips');
 
@@ -128,6 +128,57 @@ app.post('/auto-generate-clips', async (req, res) => {
     res.json({ fileUrl });
   } catch (err) {
     console.error('🔥 Error in /auto-generate-clips:', err.message);
+    res.status(500).json({ error: err.message });
+  } finally {
+    if (fs.existsSync(inputPath)) fs.unlinkSync(inputPath);
+    if (fs.existsSync(clipPath)) fs.unlinkSync(clipPath);
+  }
+});
+
+// ✂️ Manual clip generation (used by TestClipCutter)
+app.post('/generate-clips', async (req, res) => {
+  console.log('📅 התחיל תהליך /generate-clips');
+
+  const { file_id, start_time, duration } = req.body;
+  if (!file_id || typeof start_time !== 'number' || typeof duration !== 'number') {
+    return res.status(400).json({ error: 'Missing or invalid parameters' });
+  }
+
+  const inputPath = `/tmp/input_${Date.now()}.webm`;
+  const clipId = `manual_clip_${Date.now()}`;
+  const clipPath = `/tmp/${clipId}.webm`;
+
+  try {
+    const dest = fs.createWriteStream(inputPath);
+    await drive.files.get(
+      { fileId: file_id, alt: 'media' },
+      { responseType: 'stream' },
+      (err, res2) => {
+        if (err) throw err;
+        res2.data.pipe(dest);
+      }
+    );
+    await new Promise((resolve) => dest.on('finish', resolve));
+
+    const startTimeFormatted = formatTime(start_time);
+    const ffmpegCommand = `ffmpeg -ss ${startTimeFormatted} -i ${inputPath} -t ${duration} -c:v libvpx -crf 10 -b:v 1M -an -y ${clipPath}`;
+    console.log('🎞️ FFmpeg command:', ffmpegCommand);
+
+    await new Promise((resolve, reject) => {
+      exec(ffmpegCommand, (error) => {
+        if (error) reject(error);
+        else resolve();
+      });
+    });
+
+    const folderId = '1onJ7niZb1PE1UBvDu2yBuiW1ZCzADv2C'; // Short_clips
+    const response = await uploadToDrive(clipPath, `${clipId}.webm`, folderId);
+    const fileUrl = `https://drive.google.com/file/d/${response.data.id}/view`;
+
+    console.log('✅ קליפ ידני הועלה:', fileUrl);
+    res.json({ clip_url: fileUrl });
+  } catch (err) {
+    console.error('🔥 שגיאה ב- /generate-clips:', err.message);
     res.status(500).json({ error: err.message });
   } finally {
     if (fs.existsSync(inputPath)) fs.unlinkSync(inputPath);
