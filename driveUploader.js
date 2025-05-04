@@ -49,7 +49,7 @@ async function uploadToDrive({ filePath, metadata, custom_name = null }) {
   const viewUrl = `https://drive.google.com/file/d/${fileId}/view`;
   const downloadUrl = `https://drive.google.com/uc?export=download&id=${fileId}`;
 
-  return {
+  const result = {
     external_id: metadata.clip_id,
     name: fileMetadata.name,
     view_url: viewUrl,
@@ -57,11 +57,14 @@ async function uploadToDrive({ filePath, metadata, custom_name = null }) {
     thumbnail_url: '',
     duration: metadata.duration,
     created_date: metadata.created_date,
-    player_id: metadata.player_id,
-    player_name: metadata.player_name,
-    action_type: metadata.action_type,
     match_id: metadata.match_id,
   };
+
+  if (metadata.player_id) result.player_id = metadata.player_id;
+  if (metadata.player_name) result.player_name = metadata.player_name;
+  if (metadata.action_type) result.action_type = metadata.action_type;
+
+  return result;
 }
 
 async function downloadFileFromDrive(fileId, destinationPath) {
