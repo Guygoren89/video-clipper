@@ -58,6 +58,7 @@ async function uploadToDrive({ filePath, metadata, custom_name = null }) {
     duration: metadata.duration,
     created_date: metadata.created_date,
     match_id: metadata.match_id,
+    google_file_id: fileId, // ✅ נדרש ע"י Base44
   };
 
   if (metadata.player_id) result.player_id = metadata.player_id;
