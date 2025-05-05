@@ -163,7 +163,10 @@ app.post('/auto-generate-clips', async (req, res) => {
       const clipId = `auto_${Date.now()}_${Math.floor(Math.random() * 10000)}`;
       const outputPath = `/tmp/${clipId}.webm`;
 
-      const ffmpegCommand = `ffmpeg -ss ${action.start_time} -i ${inputPath} -t 8 -c:v libvpx -crf 10 -b:v 1M -an -y ${outputPath}`;
+      const startTime = action.start_time;
+      const duration = action.duration || '00:00:08';
+
+      const ffmpegCommand = `ffmpeg -ss ${startTime} -i ${inputPath} -t ${duration} -c:v libvpx -crf 10 -b:v 1M -an -y ${outputPath}`;
       console.log('🎞️ FFmpeg command:', ffmpegCommand);
 
       await new Promise((resolve, reject) => {
@@ -179,7 +182,7 @@ app.post('/auto-generate-clips', async (req, res) => {
           clip_id: clipId,
           match_id: match_id,
           created_date: new Date().toISOString(),
-          duration: '00:00:08',
+          duration: duration,
           action_type: action.action_type,
         },
         custom_name: `${clipId}.webm`
