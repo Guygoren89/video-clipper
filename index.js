@@ -46,9 +46,13 @@ function uploadToDrive(filePath, fileName, folderId) {
 // 🔁 Segment Upload (20 sec full clips)
 app.post('/upload-segment', upload.single('file'), async (req, res) => {
   console.log('📅 התחיל תהליך /upload-segment');
+
   const inputPath = req.file.path;
   const segmentId = uuidv4();
+
+  const matchId = req.body.match_id || 'unknown_match';
   const segmentPath = `/tmp/segment_${segmentId}.webm`;
+  const fileName = `segment_${matchId}_${segmentId}.webm`;
 
   const ffmpegCommand = `ffmpeg -ss 00:00:00 -i ${inputPath} -t 00:00:20 -c copy -y ${segmentPath}`;
   console.log('🎞️ FFmpeg command:', ffmpegCommand);
@@ -60,8 +64,8 @@ app.post('/upload-segment', upload.single('file'), async (req, res) => {
     }
 
     const folderId = '1vu6elArxj6YKLZePXjoqp_UFrDiI5ZOC'; // Full_clips
-    const fileName = `segment_${segmentId}.webm`;
     console.log('📂 Uploading to folder: Full_clips');
+
     try {
       const response = await uploadToDrive(segmentPath, fileName, folderId);
       const fileId = response.data.id;
