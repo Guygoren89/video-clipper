@@ -1,5 +1,3 @@
-// driveUploader.js
-
 const fs = require('fs');
 const path = require('path');
 const { google } = require('googleapis');
@@ -69,6 +67,38 @@ async function uploadToDrive({ filePath, metadata, custom_name = null }) {
   return result;
 }
 
+async function downloadFileFromDrive(fileId, destinationPath) {
+  const dest = fs.createWriteStream(destinationPath);
+  const res = await drive.files.get({ fileId, alt: 'media' }, { responseType: 'stream' });
+  await new Promise((resolve, reject) => {
+    res.data.pipe(dest);
+    dest.on('finish', resolve);
+    dest.on('error', reject);
+  });
+}
+
+async function listClipsFromDrive(type = 'short') {
+  const folderId = type === 'full' ? FOLDER_IDS.full : FOLDER_IDS.short;
+
+  const response = await drive.files.list({
+    q: `'${folderId}' in parents and trashed = false`,
+    fields: 'files(id, name, createdTime, webViewLink, webContentLink)',
+    orderBy: 'createdTime desc',
+    pageSize: 1000,
+  });
+
+  return response.data.files.map(file => ({
+    external_id: file.id,
+    name: file.name,
+    view_url: file.webViewLink,
+    download_url: file.webContentLink,
+    thumbnail_url: '',
+    created_date: file.createdTime,
+  }));
+}
+
 module.exports = {
   uploadToDrive,
+  downloadFileFromDrive,
+  listClipsFromDrive,
 };
