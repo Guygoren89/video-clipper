@@ -7,7 +7,8 @@ const multer = require('multer');
 const cors = require('cors');
 const path = require('path');
 
-const { uploadToDrive, downloadFileFromDrive } = require('./driveUploader');
+const { uploadToDrive } = require('./driveUploader');
+const generateClipsRouter = require('./generateClipsRouter'); // ✅ חיבור ל־/generate-clips
 
 const app = express();
 const port = 10000;
@@ -15,7 +16,8 @@ app.use(cors());
 app.use(bodyParser.json());
 const upload = multer({ dest: '/tmp' });
 
-// Utilities
+app.use('/', generateClipsRouter); // ✅ שימוש ב־router
+
 function formatTime(seconds) {
   const hrs = Math.floor(seconds / 3600);
   const mins = Math.floor((seconds % 3600) / 60);
@@ -68,7 +70,7 @@ app.post('/upload-segment', upload.single('file'), async (req, res) => {
   });
 });
 
-// ✂️ auto-generate-clips לפי מערך פעולות
+// ✅ auto-generate-clips לפי מערך פעולות
 app.post('/auto-generate-clips', async (req, res) => {
   console.log('📅 התחיל תהליך /auto-generate-clips');
 
@@ -78,10 +80,23 @@ app.post('/auto-generate-clips', async (req, res) => {
   }
 
   const inputPath = `/tmp/input_${Date.now()}.webm`;
-
   try {
     // הורדת הקובץ מהדרייב
-    await downloadFileFromDrive(file_id, inputPath);
+    const dest = fs.createWriteStream(inputPath);
+    const { google } = require('googleapis');
+    const auth = new google.auth.GoogleAuth({ scopes: ['https://www.googleapis.com/auth/drive'] });
+    const drive = google.drive({ version: 'v3', auth });
+
+    await drive.files.get(
+      { fileId: file_id, alt: 'media' },
+      { responseType: 'stream' },
+      (err, res2) => {
+        if (err) throw err;
+        res2.data.pipe(dest);
+      }
+    );
+    await new Promise((resolve) => dest.on('finish', resolve));
+
     const clipResults = [];
 
     for (const action of actions) {
@@ -91,7 +106,7 @@ app.post('/auto-generate-clips', async (req, res) => {
       const startTime = action.start_time;
       const duration = action.duration || '00:00:08';
 
-      const ffmpegCommand = `ffmpeg -ss ${startTime} -i ${inputPath} -t ${duration} -c copy -y ${outputPath}`;
+      const ffmpegCommand = `ffmpeg -ss ${startTime} -i ${inputPath} -t ${duration} -c:v libvpx -crf 10 -b:v 1M -an -y ${outputPath}`;
       console.log('🎞️ FFmpeg command:', ffmpegCommand);
 
       await new Promise((resolve, reject) => {
@@ -114,7 +129,6 @@ app.post('/auto-generate-clips', async (req, res) => {
       });
 
       clipResults.push(uploaded);
-
       fs.unlinkSync(outputPath);
     }
 
