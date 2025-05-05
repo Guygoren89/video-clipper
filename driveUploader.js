@@ -13,16 +13,16 @@ const FOLDER_IDS = {
   short: '1onJ7niZb1PE1UBvDu2yBuiW1ZCzADv2C'
 };
 
-function isFullClip(metadata) {
-  return metadata.action_type === 'segment_upload';
-}
-
 async function uploadToDrive({ filePath, metadata, custom_name = null }) {
-  const folderId = isFullClip(metadata) ? FOLDER_IDS.full : FOLDER_IDS.short;
-  const finalName = custom_name || `${metadata.match_id}_${path.basename(filePath)}`;
+  const actionType = (metadata.action_type || '').toLowerCase().trim();
+  const isFullClip = actionType === 'segment_upload';
+  const folderId = isFullClip ? FOLDER_IDS.full : FOLDER_IDS.short;
+
+  console.log(`📂 Uploading to folder: ${isFullClip ? 'Full_clips' : 'Short_clips'}`);
+  console.log(`📄 File name: ${custom_name || path.basename(filePath)}`);
 
   const fileMetadata = {
-    name: finalName,
+    name: custom_name || `${metadata.match_id}_${path.basename(filePath)}`,
     parents: [folderId],
   };
 
@@ -31,13 +31,13 @@ async function uploadToDrive({ filePath, metadata, custom_name = null }) {
     body: fs.createReadStream(filePath),
   };
 
-  const file = await drive.files.create({
+  const res = await drive.files.create({
     requestBody: fileMetadata,
     media,
     fields: 'id',
   });
 
-  const fileId = file.data.id;
+  const fileId = res.data.id;
 
   await drive.permissions.create({
     fileId,
@@ -52,7 +52,7 @@ async function uploadToDrive({ filePath, metadata, custom_name = null }) {
 
   const result = {
     external_id: metadata.clip_id,
-    name: finalName,
+    name: fileMetadata.name,
     view_url: viewUrl,
     download_url: downloadUrl,
     thumbnail_url: '',
