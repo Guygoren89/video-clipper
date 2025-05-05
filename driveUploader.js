@@ -1,7 +1,8 @@
+// driveUploader.js
+
 const fs = require('fs');
 const path = require('path');
 const { google } = require('googleapis');
-const { v4: uuidv4 } = require('uuid');
 
 const SCOPES = ['https://www.googleapis.com/auth/drive'];
 const auth = new google.auth.GoogleAuth({ scopes: SCOPES });
@@ -12,16 +13,16 @@ const FOLDER_IDS = {
   short: '1onJ7niZb1PE1UBvDu2yBuiW1ZCzADv2C'
 };
 
-async function uploadToDrive({ filePath, metadata, custom_name = null }) {
-  const actionType = (metadata.action_type || '').toLowerCase().trim();
-  const isFullClip = actionType === 'segment_upload';
-  const folderId = isFullClip ? FOLDER_IDS.full : FOLDER_IDS.short;
+function isFullClip(metadata) {
+  return metadata.action_type === 'segment_upload';
+}
 
-  console.log(`📂 Uploading to folder: ${isFullClip ? 'Full_clips' : 'Short_clips'}`);
-  console.log(`📄 File name: ${custom_name || path.basename(filePath)}`);
+async function uploadToDrive({ filePath, metadata, custom_name = null }) {
+  const folderId = isFullClip(metadata) ? FOLDER_IDS.full : FOLDER_IDS.short;
+  const finalName = custom_name || `${metadata.match_id}_${path.basename(filePath)}`;
 
   const fileMetadata = {
-    name: custom_name || `${metadata.match_id}_${path.basename(filePath)}`,
+    name: finalName,
     parents: [folderId],
   };
 
@@ -30,13 +31,13 @@ async function uploadToDrive({ filePath, metadata, custom_name = null }) {
     body: fs.createReadStream(filePath),
   };
 
-  const res = await drive.files.create({
+  const file = await drive.files.create({
     requestBody: fileMetadata,
     media,
     fields: 'id',
   });
 
-  const fileId = res.data.id;
+  const fileId = file.data.id;
 
   await drive.permissions.create({
     fileId,
@@ -51,14 +52,14 @@ async function uploadToDrive({ filePath, metadata, custom_name = null }) {
 
   const result = {
     external_id: metadata.clip_id,
-    name: fileMetadata.name,
+    name: finalName,
     view_url: viewUrl,
     download_url: downloadUrl,
     thumbnail_url: '',
     duration: metadata.duration,
     created_date: metadata.created_date,
     match_id: metadata.match_id,
-    google_file_id: fileId, // ✅ נדרש ע"י Base44
+    google_file_id: fileId,
   };
 
   if (metadata.player_id) result.player_id = metadata.player_id;
@@ -68,38 +69,6 @@ async function uploadToDrive({ filePath, metadata, custom_name = null }) {
   return result;
 }
 
-async function downloadFileFromDrive(fileId, destinationPath) {
-  const dest = fs.createWriteStream(destinationPath);
-  const res = await drive.files.get({ fileId, alt: 'media' }, { responseType: 'stream' });
-  await new Promise((resolve, reject) => {
-    res.data.pipe(dest);
-    dest.on('finish', resolve);
-    dest.on('error', reject);
-  });
-}
-
-async function listClipsFromDrive(type = 'short') {
-  const folderId = type === 'full' ? FOLDER_IDS.full : FOLDER_IDS.short;
-
-  const response = await drive.files.list({
-    q: `'${folderId}' in parents and trashed = false`,
-    fields: 'files(id, name, createdTime, webViewLink, webContentLink)',
-    orderBy: 'createdTime desc',
-    pageSize: 1000,
-  });
-
-  return response.data.files.map(file => ({
-    external_id: file.id,
-    name: file.name,
-    view_url: file.webViewLink,
-    download_url: file.webContentLink,
-    thumbnail_url: '',
-    created_date: file.createdTime,
-  }));
-}
-
 module.exports = {
   uploadToDrive,
-  downloadFileFromDrive,
-  listClipsFromDrive,
 };
