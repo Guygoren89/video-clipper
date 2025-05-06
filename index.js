@@ -39,7 +39,7 @@ app.post('/upload-segment', upload.single('file'), async (req, res) => {
   const segmentId = uuidv4();
   const segmentPath = `/tmp/segment_${segmentId}.webm`;
 
-  const ffmpegCommand = `ffmpeg -ss 00:00:00 -i ${inputPath} -t 00:00:20 -c copy -y ${segmentPath}`;
+  const ffmpegCommand = `ffmpeg -ss 00:00:00 -i ${inputPath} -t 00:00:20 -c:v libvpx -an -y ${segmentPath}`;
   console.log('🎞️ FFmpeg command:', ffmpegCommand);
 
   exec(ffmpegCommand, async (error) => {
@@ -93,7 +93,7 @@ app.post('/generate-clips', async (req, res) => {
   try {
     await downloadFileFromDrive(file_id, inputPath);
 
-    const ffmpegCommand = `ffmpeg -ss ${formatTime(start)} -i ${inputPath} -t ${formatTime(length)} -c copy -y ${clipPath}`;
+    const ffmpegCommand = `ffmpeg -ss ${formatTime(start)} -i ${inputPath} -t ${formatTime(length)} -c:v libvpx -an -y ${clipPath}`;
     console.log('🎞️ FFmpeg command:', ffmpegCommand);
 
     await new Promise((resolve, reject) => {
@@ -146,7 +146,7 @@ app.post('/auto-generate-clips', async (req, res) => {
       const clipId = uuidv4();
       const outputPath = `/tmp/clip_${clipId}.webm`;
 
-      const ffmpegCommand = `ffmpeg -ss ${formatTime(start)} -i ${inputPath} -t ${formatTime(length)} -c copy -y ${outputPath}`;
+      const ffmpegCommand = `ffmpeg -ss ${formatTime(start)} -i ${inputPath} -t ${formatTime(length)} -c:v libvpx -an -y ${outputPath}`;
       console.log('🎞️ FFmpeg command:', ffmpegCommand);
 
       await new Promise((resolve, reject) => {
