@@ -15,7 +15,7 @@ app.use(cors());
 app.use(bodyParser.json());
 const upload = multer({ dest: '/tmp' });
 
-// 🔁 Segment Upload – קליפ מלא של 20 שניות
+// 🔁 Upload segment – סרטון מלא באורך 20 שניות
 app.post('/upload-segment', upload.single('file'), async (req, res) => {
   console.log('📅 התחיל תהליך /upload-segment');
   const inputPath = req.file.path;
@@ -57,7 +57,7 @@ app.post('/upload-segment', upload.single('file'), async (req, res) => {
   });
 });
 
-// ✂️ /generate-clips – חיתוך קליפ יחיד לפי זמנים
+// ✂️ Clip generation – חיתוך קליפ יחיד
 app.post('/generate-clips', async (req, res) => {
   console.log('📅 התחיל תהליך /generate-clips');
   const { file_id, start_time, duration, match_id, action_type } = req.body;
@@ -102,6 +102,62 @@ app.post('/generate-clips', async (req, res) => {
   } finally {
     if (fs.existsSync(inputPath)) fs.unlinkSync(inputPath);
     if (fs.existsSync(clipPath)) fs.unlinkSync(clipPath);
+  }
+});
+
+// ⚡ Auto-generate-clips לפי מערך פעולות
+app.post('/auto-generate-clips', async (req, res) => {
+  console.log('📅 התחיל תהליך /auto-generate-clips');
+  const { file_id, match_id, actions } = req.body;
+
+  if (!file_id || !Array.isArray(actions) || actions.length === 0) {
+    return res.status(400).json({ error: 'Missing file_id or actions' });
+  }
+
+  const inputPath = `/tmp/input_${Date.now()}.webm`;
+  try {
+    await downloadFileFromDrive(file_id, inputPath);
+
+    const clipResults = [];
+
+    for (const action of actions) {
+      const clipId = uuidv4();
+      const outputPath = `/tmp/clip_${clipId}.webm`;
+      const startTime = typeof action.start_time === 'number' ? action.start_time : parseFloat(action.start_time);
+      const duration = typeof action.duration === 'number' ? action.duration : parseFloat(action.duration || 8);
+
+      const ffmpegCommand = `ffmpeg -ss ${startTime} -i ${inputPath} -t ${duration} -c copy -y ${outputPath}`;
+      console.log('🎞️ FFmpeg command:', ffmpegCommand);
+
+      await new Promise((resolve, reject) => {
+        exec(ffmpegCommand, (error) => {
+          if (error) reject(error);
+          else resolve();
+        });
+      });
+
+      const uploaded = await uploadToDrive({
+        filePath: outputPath,
+        metadata: {
+          clip_id: clipId,
+          match_id: match_id,
+          created_date: new Date().toISOString(),
+          duration: duration.toString(),
+          action_type: action.action_type || 'auto',
+        },
+        custom_name: `clip_${match_id}_${clipId}.webm`,
+      });
+
+      clipResults.push(uploaded);
+      fs.unlinkSync(outputPath);
+    }
+
+    res.json({ clips: clipResults });
+  } catch (err) {
+    console.error('🔥 שגיאה ב- /auto-generate-clips:', err.message);
+    res.status(500).json({ error: err.message });
+  } finally {
+    if (fs.existsSync(inputPath)) fs.unlinkSync(inputPath);
   }
 });
 
