@@ -15,7 +15,24 @@ app.use(cors());
 app.use(bodyParser.json());
 const upload = multer({ dest: '/tmp' });
 
-// 🔁 Upload segment – סרטון מלא באורך 20 שניות
+function formatTime(seconds) {
+  const hrs = Math.floor(seconds / 3600);
+  const mins = Math.floor((seconds % 3600) / 60);
+  const secs = Math.floor(seconds % 60);
+  return `${pad(hrs)}:${pad(mins)}:${pad(secs)}`;
+}
+
+function pad(n) {
+  return n.toString().padStart(2, '0');
+}
+
+function parseTime(time) {
+  if (typeof time === 'number') return time;
+  const parts = time.split(':').map(Number);
+  return (parts[0] || 0) * 3600 + (parts[1] || 0) * 60 + (parts[2] || 0);
+}
+
+// 🔁 Segment Upload – קליפ מלא של 20 שניות
 app.post('/upload-segment', upload.single('file'), async (req, res) => {
   console.log('📅 התחיל תהליך /upload-segment');
   const inputPath = req.file.path;
@@ -57,14 +74,17 @@ app.post('/upload-segment', upload.single('file'), async (req, res) => {
   });
 });
 
-// ✂️ Clip generation – חיתוך קליפ יחיד
+// ✂️ generate-clips – חיתוך קליפ אחד
 app.post('/generate-clips', async (req, res) => {
   console.log('📅 התחיל תהליך /generate-clips');
   const { file_id, start_time, duration, match_id, action_type } = req.body;
 
-  if (!file_id || typeof start_time !== 'number' || typeof duration !== 'number') {
-    return res.status(400).json({ error: 'Missing or invalid parameters' });
+  if (!file_id || start_time === undefined) {
+    return res.status(400).json({ error: 'Missing required parameters' });
   }
+
+  const start = parseTime(start_time);
+  const length = duration !== undefined ? parseTime(duration) : 8;
 
   const inputPath = `/tmp/input_${Date.now()}.webm`;
   const clipId = uuidv4();
@@ -73,7 +93,7 @@ app.post('/generate-clips', async (req, res) => {
   try {
     await downloadFileFromDrive(file_id, inputPath);
 
-    const ffmpegCommand = `ffmpeg -ss ${start_time} -i ${inputPath} -t ${duration} -c copy -y ${clipPath}`;
+    const ffmpegCommand = `ffmpeg -ss ${formatTime(start)} -i ${inputPath} -t ${formatTime(length)} -c copy -y ${clipPath}`;
     console.log('🎞️ FFmpeg command:', ffmpegCommand);
 
     await new Promise((resolve, reject) => {
@@ -89,7 +109,7 @@ app.post('/generate-clips', async (req, res) => {
         clip_id: clipId,
         match_id: match_id || 'manual_match',
         created_date: new Date().toISOString(),
-        duration: duration.toString(),
+        duration: length.toString(),
         action_type: action_type || 'manual',
       },
       custom_name: `clip_${match_id || 'manual'}_${clipId}.webm`,
@@ -105,7 +125,7 @@ app.post('/generate-clips', async (req, res) => {
   }
 });
 
-// ⚡ Auto-generate-clips לפי מערך פעולות
+// ✅ auto-generate-clips – חותך קליפים מרובים
 app.post('/auto-generate-clips', async (req, res) => {
   console.log('📅 התחיל תהליך /auto-generate-clips');
   const { file_id, match_id, actions } = req.body;
@@ -121,12 +141,12 @@ app.post('/auto-generate-clips', async (req, res) => {
     const clipResults = [];
 
     for (const action of actions) {
+      const start = parseTime(action.start_time);
+      const length = action.duration !== undefined ? parseTime(action.duration) : 8;
       const clipId = uuidv4();
       const outputPath = `/tmp/clip_${clipId}.webm`;
-      const startTime = typeof action.start_time === 'number' ? action.start_time : parseFloat(action.start_time);
-      const duration = typeof action.duration === 'number' ? action.duration : parseFloat(action.duration || 8);
 
-      const ffmpegCommand = `ffmpeg -ss ${startTime} -i ${inputPath} -t ${duration} -c copy -y ${outputPath}`;
+      const ffmpegCommand = `ffmpeg -ss ${formatTime(start)} -i ${inputPath} -t ${formatTime(length)} -c copy -y ${outputPath}`;
       console.log('🎞️ FFmpeg command:', ffmpegCommand);
 
       await new Promise((resolve, reject) => {
@@ -142,8 +162,8 @@ app.post('/auto-generate-clips', async (req, res) => {
           clip_id: clipId,
           match_id: match_id,
           created_date: new Date().toISOString(),
-          duration: duration.toString(),
-          action_type: action.action_type || 'auto',
+          duration: length.toString(),
+          action_type: action.action_type,
         },
         custom_name: `clip_${match_id}_${clipId}.webm`,
       });
@@ -161,7 +181,6 @@ app.post('/auto-generate-clips', async (req, res) => {
   }
 });
 
-// 🚀 Start server
 app.listen(port, () => {
   console.log(`🚀 Video Clipper running on port ${port}`);
 });
