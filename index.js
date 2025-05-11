@@ -19,17 +19,17 @@ app.get('/', (req, res) => {
   res.send('Video Clipper API is running');
 });
 
-// העלאת מקטע וידאו
-app.post('/upload-segment', upload.single('video'), async (req, res) => {
+// ⬅️ שים לב לשינוי כאן:
+app.post('/upload-segment', upload.single('file'), async (req, res) => {
   try {
     const { filename, match_id, start_time, end_time } = req.body;
     const videoFile = req.file;
 
-    if (!videoFile || !filename || !match_id || start_time == null || end_time == null) {
+    if (!videoFile || !match_id || start_time == null || end_time == null) {
       return res.status(400).json({ error: 'Missing required fields' });
     }
 
-    const result = await uploadSegmentToDrive(videoFile, filename, match_id, start_time, end_time);
+    const result = await uploadSegmentToDrive(videoFile, filename || videoFile.originalname, match_id, start_time, end_time);
     res.json(result);
   } catch (err) {
     console.error('upload-segment error:', err);
@@ -37,7 +37,6 @@ app.post('/upload-segment', upload.single('video'), async (req, res) => {
   }
 });
 
-// חיתוך קליפ בודד
 app.post('/generate-clips', async (req, res) => {
   try {
     const { file_id, start_time_in_segment, duration, match_id, action_type } = req.body;
@@ -54,7 +53,6 @@ app.post('/generate-clips', async (req, res) => {
   }
 });
 
-// חיתוך קליפים מרובים
 app.post('/auto-generate-clips', async (req, res) => {
   try {
     const { file_id, clip_timestamps, match_id } = req.body;
