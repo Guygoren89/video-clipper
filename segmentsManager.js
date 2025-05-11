@@ -28,6 +28,8 @@ async function cutClip(fileId, startTimeInSec, durationInSec, matchId, actionTyp
   });
 
   const ffmpegCmd = `ffmpeg -ss ${startTimeInSec} -i ${tempInput} -t ${durationInSec} -c copy ${tempOutput}`;
+  console.log('[FFmpeg]', ffmpegCmd);
+
   await new Promise((resolve, reject) => {
     exec(ffmpegCmd, (err, stdout, stderr) => {
       if (err) {
@@ -41,7 +43,7 @@ async function cutClip(fileId, startTimeInSec, durationInSec, matchId, actionTyp
   const uploadRes = await drive.files.create({
     resource: {
       name: `clip_${Date.now()}.webm`,
-      parents: ['1onJ7niZb1PE1UBvDu2yBuiW1ZCzADv2c'], // תיקיית Short_clips
+      parents: ['1onJ7niZb1PE1UBvDu2yBuiW1ZCzADv2c'], // Short_clips
     },
     media: {
       mimeType: 'video/webm',
