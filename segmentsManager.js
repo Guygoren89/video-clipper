@@ -16,10 +16,17 @@ async function cutClip(fileId, startTimeInSec, durationInSec, matchId, actionTyp
   const tempOutput = path.join('/tmp', `${uuidv4()}.webm`);
 
   const dest = fs.createWriteStream(tempInput);
+
+  // ✅ תיקון: auth מפורש לקריאה לקובץ
   const res = await drive.files.get(
-    { fileId, alt: 'media' },
+    {
+      fileId,
+      alt: 'media',
+      auth: authClient
+    },
     { responseType: 'stream' }
   );
+
   await new Promise((resolve, reject) => {
     res.data
       .on('end', resolve)
