@@ -47,10 +47,12 @@ async function uploadSegmentToDrive(file, filename, match_id, start_time, end_ti
 
   return {
     success: true,
-    file_id: fileId,
-    name: filename,
-    start_time,
-    end_time,
+    clip: {
+      google_file_id: fileId,
+      name: filename,
+      start_time,
+      end_time,
+    }
   };
 }
 
