@@ -1,28 +1,27 @@
 const { google } = require('googleapis');
 const fs = require('fs');
 const path = require('path');
-const { v4: uuidv4 } = require('uuid');
 
 const auth = new google.auth.GoogleAuth({
   scopes: ['https://www.googleapis.com/auth/drive'],
 });
 
-async function uploadSegmentToDrive(base64Video, filename, match_id, start_time, end_time) {
-  const buffer = Buffer.from(base64Video, 'base64');
-  const tempPath = path.join('/tmp', `${uuidv4()}_${filename}.webm`);
-  fs.writeFileSync(tempPath, buffer);
+async function uploadSegmentToDrive(file, filename, match_id, start_time, end_time) {
+  if (file.mimetype !== 'video/webm') {
+    throw new Error('Invalid file type. Only video/webm is allowed.');
+  }
 
   const authClient = await auth.getClient();
   const drive = google.drive({ version: 'v3', auth: authClient });
 
   const fileMetadata = {
     name: filename,
-    parents: ['1vu6elArxj6YKLZePXjoqp_UFrDiI5ZOC'], // תיקיית Full_clips
+    parents: ['1vu6elArxj6YKLZePXjoqp_UFrDiI5ZOC'], // Full_clips
   };
 
   const media = {
-    mimeType: 'video/webm',
-    body: fs.createReadStream(tempPath),
+    mimeType: file.mimetype,
+    body: fs.createReadStream(file.path),
   };
 
   const uploadResponse = await drive.files.create({
@@ -44,7 +43,7 @@ async function uploadSegmentToDrive(base64Video, filename, match_id, start_time,
     },
   });
 
-  fs.unlinkSync(tempPath);
+  fs.unlinkSync(file.path);
 
   return {
     success: true,
