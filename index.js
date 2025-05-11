@@ -1,6 +1,9 @@
 const express = require('express');
 const bodyParser = require('body-parser');
 const cors = require('cors');
+const multer = require('multer');
+const upload = multer({ dest: '/tmp' });
+
 const { uploadSegmentToDrive } = require('./driveUploader');
 const { cutClip } = require('./segmentsManager');
 
@@ -8,24 +11,24 @@ const app = express();
 const port = process.env.PORT || 3001;
 
 app.use(cors());
-app.use(bodyParser.json({ limit: '100mb' }));
+app.use(bodyParser.json());
 app.use(bodyParser.urlencoded({ extended: true }));
 
-// בדיקת חיבור
 app.get('/', (req, res) => {
   res.send('Video Clipper API is running');
 });
 
-// העלאת מקטע (20 שניות)
-app.post('/upload-segment', async (req, res) => {
+// POST /upload-segment עם קובץ וידיאו
+app.post('/upload-segment', upload.single('video'), async (req, res) => {
   try {
-    const { base64Video, filename, match_id, start_time, end_time } = req.body;
+    const { filename, match_id, start_time, end_time } = req.body;
+    const videoFile = req.file;
 
-    if (!base64Video || !filename || !match_id || start_time == null || end_time == null) {
+    if (!videoFile || !filename || !match_id || start_time == null || end_time == null) {
       return res.status(400).json({ error: 'Missing required fields' });
     }
 
-    const result = await uploadSegmentToDrive(base64Video, filename, match_id, start_time, end_time);
+    const result = await uploadSegmentToDrive(videoFile, filename, match_id, start_time, end_time);
     res.json(result);
   } catch (err) {
     console.error('upload-segment error:', err);
@@ -33,7 +36,7 @@ app.post('/upload-segment', async (req, res) => {
   }
 });
 
-// חיתוך קליפ קצר מתוך מקטע
+// POST /generate-clips כרגיל
 app.post('/generate-clips', async (req, res) => {
   try {
     const { file_id, start_time_in_segment, duration, match_id, action_type } = req.body;
