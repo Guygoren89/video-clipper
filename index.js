@@ -6,6 +6,7 @@ const upload = multer({ dest: '/tmp' });
 
 const { uploadSegmentToDrive } = require('./driveUploader');
 const { cutClip } = require('./segmentsManager');
+const { autoGenerateClips } = require('./autoGenerateClips');
 
 const app = express();
 const port = process.env.PORT || 3001;
@@ -18,7 +19,7 @@ app.get('/', (req, res) => {
   res.send('Video Clipper API is running');
 });
 
-// POST /upload-segment עם קובץ וידיאו
+// העלאת מקטע וידיאו (20 שניות) דרך קובץ
 app.post('/upload-segment', upload.single('video'), async (req, res) => {
   try {
     const { filename, match_id, start_time, end_time } = req.body;
@@ -36,7 +37,7 @@ app.post('/upload-segment', upload.single('video'), async (req, res) => {
   }
 });
 
-// POST /generate-clips כרגיל
+// חיתוך קליפ בודד מתוך מקטע
 app.post('/generate-clips', async (req, res) => {
   try {
     const { file_id, start_time_in_segment, duration, match_id, action_type } = req.body;
@@ -50,6 +51,23 @@ app.post('/generate-clips', async (req, res) => {
   } catch (err) {
     console.error('generate-clips error:', err);
     res.status(500).json({ error: 'Failed to generate clip' });
+  }
+});
+
+// חיתוך מרובה – לפי מערך של start_time בלבד
+app.post('/auto-generate-clips', async (req, res) => {
+  try {
+    const { file_id, clip_timestamps } = req.body;
+
+    if (!file_id || !Array.isArray(clip_timestamps)) {
+      return res.status(400).json({ error: 'Missing required fields' });
+    }
+
+    const results = await autoGenerateClips(file_id, clip_timestamps);
+    res.json(results);
+  } catch (err) {
+    console.error('auto-generate-clips error:', err);
+    res.status(500).json({ error: 'Failed to auto generate clips' });
   }
 });
 
