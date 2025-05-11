@@ -19,7 +19,7 @@ app.get('/', (req, res) => {
   res.send('Video Clipper API is running');
 });
 
-// העלאת מקטע וידיאו (20 שניות) דרך קובץ
+// העלאת סרטון 20 שניות
 app.post('/upload-segment', upload.single('video'), async (req, res) => {
   try {
     const { filename, match_id, start_time, end_time } = req.body;
@@ -37,7 +37,7 @@ app.post('/upload-segment', upload.single('video'), async (req, res) => {
   }
 });
 
-// חיתוך קליפ בודד מתוך מקטע
+// חיתוך קליפ בודד
 app.post('/generate-clips', async (req, res) => {
   try {
     const { file_id, start_time_in_segment, duration, match_id, action_type } = req.body;
@@ -54,7 +54,7 @@ app.post('/generate-clips', async (req, res) => {
   }
 });
 
-// חיתוך מרובה – לפי מערך של start_time בלבד
+// חיתוך מרובה
 app.post('/auto-generate-clips', async (req, res) => {
   try {
     const { file_id, clip_timestamps } = req.body;
