@@ -4,7 +4,7 @@ const path = require('path');
 const { exec } = require('child_process');
 const { v4: uuidv4 } = require('uuid');
 
-// forced redeploy - 11/05
+// updated folderId - 11/05
 
 const auth = new google.auth.GoogleAuth({
   scopes: ['https://www.googleapis.com/auth/drive'],
@@ -51,7 +51,7 @@ async function cutClip(fileId, startTimeInSec, durationInSec, matchId, actionTyp
   const uploadRes = await drive.files.create({
     resource: {
       name: `clip_${Date.now()}.webm`,
-      parents: ['1onJ7niZb1PE1UBvDu2yBuiW1ZCzADv2c'], // Short_clips
+      parents: ['1Lb0MSD-CKIsy1XCqb4b4ROvvGidqtmzU'], // תיקיית Short_clips_2025
     },
     media: {
       mimeType: 'video/webm',
