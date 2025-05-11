@@ -4,6 +4,8 @@ const path = require('path');
 const { exec } = require('child_process');
 const { v4: uuidv4 } = require('uuid');
 
+// forced redeploy - 11/05
+
 const auth = new google.auth.GoogleAuth({
   scopes: ['https://www.googleapis.com/auth/drive'],
 });
@@ -17,7 +19,6 @@ async function cutClip(fileId, startTimeInSec, durationInSec, matchId, actionTyp
 
   const dest = fs.createWriteStream(tempInput);
 
-  // ✅ תיקון: auth מפורש לקריאה לקובץ
   const res = await drive.files.get(
     {
       fileId,
