@@ -19,7 +19,7 @@ app.get('/', (req, res) => {
   res.send('Video Clipper API is running');
 });
 
-// העלאת סרטון 20 שניות
+// העלאת מקטע וידאו
 app.post('/upload-segment', upload.single('video'), async (req, res) => {
   try {
     const { filename, match_id, start_time, end_time } = req.body;
@@ -54,16 +54,16 @@ app.post('/generate-clips', async (req, res) => {
   }
 });
 
-// חיתוך מרובה
+// חיתוך קליפים מרובים
 app.post('/auto-generate-clips', async (req, res) => {
   try {
-    const { file_id, clip_timestamps } = req.body;
+    const { file_id, clip_timestamps, match_id } = req.body;
 
     if (!file_id || !Array.isArray(clip_timestamps)) {
       return res.status(400).json({ error: 'Missing required fields' });
     }
 
-    const results = await autoGenerateClips(file_id, clip_timestamps);
+    const results = await autoGenerateClips(file_id, clip_timestamps, match_id);
     res.json(results);
   } catch (err) {
     console.error('auto-generate-clips error:', err);
