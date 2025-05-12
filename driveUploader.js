@@ -1,3 +1,5 @@
+// driveUploader.js
+
 const { google } = require('googleapis');
 const fs = require('fs');
 const path = require('path');
@@ -16,7 +18,7 @@ async function uploadSegmentToDrive(file, filename, match_id, start_time, end_ti
 
   const fileMetadata = {
     name: filename,
-    parents: ['1vu6elArxj6YKLZePXjoqp_UFrDiI5ZOC'], // Full_clips
+    parents: ['1vu6elArxj6YKLZePXjoqp_UFrDiI5ZOC'], // Full_clips folder
   };
 
   const media = {
@@ -43,7 +45,15 @@ async function uploadSegmentToDrive(file, filename, match_id, start_time, end_ti
     },
   });
 
-  fs.unlinkSync(file.path);
+  fs.unlink(file.path, (err) => {
+    if (err) {
+      console.error(`Failed to delete temp file: ${file.path}`, err);
+    } else {
+      console.log(`Temp file deleted: ${file.path}`);
+    }
+  });
+
+  console.log(`[UPLOAD DONE] file_id: ${fileId}, name: ${filename}`);
 
   return {
     success: true,
@@ -52,7 +62,7 @@ async function uploadSegmentToDrive(file, filename, match_id, start_time, end_ti
       name: filename,
       start_time,
       end_time,
-    }
+    },
   };
 }
 
