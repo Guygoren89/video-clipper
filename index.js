@@ -45,7 +45,20 @@ app.post('/upload-segment', upload.single('file'), async (req, res) => {
 
     console.log('✅ Upload complete:', clip);
 
-    res.status(200).json({ success: true, clip: { google_file_id: clip.file_id } });
+    if (!clip || !clip.file_id) {
+      console.warn('⚠️ clip.file_id is missing or invalid');
+      return res.status(200).json({ success: true, clip: {} });
+    }
+
+    res.status(200).json({
+      success: true,
+      clip: {
+        google_file_id: clip.file_id,
+        name: clip.name,
+        start_time: clip.start_time,
+        end_time: clip.end_time
+      }
+    });
   } catch (error) {
     console.error('❌ Error in /upload-segment:', error.message);
     res.status(500).json({ success: false, error: error.message });
