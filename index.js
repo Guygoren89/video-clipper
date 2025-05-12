@@ -1,74 +1,78 @@
 const express = require('express');
-const bodyParser = require('body-parser');
-const cors = require('cors');
 const multer = require('multer');
-const upload = multer({ dest: '/tmp' });
+const cors = require('cors');
+const path = require('path');
+const fs = require('fs');
 
 const { uploadSegmentToDrive } = require('./driveUploader');
-const { cutClip } = require('./segmentsManager');
 const { autoGenerateClips } = require('./autoGenerateClips');
 
 const app = express();
-const port = process.env.PORT || 3001;
+const PORT = process.env.PORT || 10000;
 
 app.use(cors());
-app.use(bodyParser.json());
-app.use(bodyParser.urlencoded({ extended: true }));
+app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
 
+// תצורת multer לשמירת קבצים זמניים
+const upload = multer({ dest: 'uploads/' });
+
+// 🔵 נתיב בריאות
 app.get('/', (req, res) => {
-  res.send('Video Clipper API is running');
+  res.send('Video Clipper Server is running');
 });
 
-// ⬅️ שים לב לשינוי כאן:
+// 🔴 נתיב העלאת מקטע
 app.post('/upload-segment', upload.single('file'), async (req, res) => {
   try {
-    const { filename, match_id, start_time, end_time } = req.body;
-    const videoFile = req.file;
+    const { match_id, start_time, end_time } = req.body;
+    const file = req.file;
 
-    if (!videoFile || !match_id || start_time == null || end_time == null) {
-      return res.status(400).json({ error: 'Missing required fields' });
+    if (!file || !match_id || !start_time || !end_time) {
+      console.error('❌ Missing required fields:', { match_id, start_time, end_time, file });
+      return res.status(400).json({ success: false, error: 'Missing required fields' });
     }
 
-    const result = await uploadSegmentToDrive(videoFile, filename || videoFile.originalname, match_id, start_time, end_time);
-    res.json(result);
-  } catch (err) {
-    console.error('upload-segment error:', err);
-    res.status(500).json({ error: 'Failed to upload segment' });
+    console.log('📤 Uploading segment:', {
+      name: file.originalname,
+      sizeMB: (file.size / 1024 / 1024).toFixed(2),
+      match_id,
+      start_time,
+      end_time,
+    });
+
+    const clip = await uploadSegmentToDrive(file, file.originalname, match_id, start_time, end_time);
+
+    console.log('✅ Upload complete:', clip);
+
+    res.status(200).json({ success: true, clip: { google_file_id: clip.file_id } });
+  } catch (error) {
+    console.error('❌ Error in /upload-segment:', error.message);
+    res.status(500).json({ success: false, error: error.message });
   }
 });
 
-app.post('/generate-clips', async (req, res) => {
-  try {
-    const { file_id, start_time_in_segment, duration, match_id, action_type } = req.body;
-
-    if (!file_id || start_time_in_segment == null || !duration) {
-      return res.status(400).json({ error: 'Missing required fields' });
-    }
-
-    const result = await cutClip(file_id, start_time_in_segment, duration, match_id, action_type);
-    res.json(result);
-  } catch (err) {
-    console.error('generate-clips error:', err);
-    res.status(500).json({ error: 'Failed to generate clip' });
-  }
-});
-
+// 🟢 נתיב חיתוך לפי פעולות
 app.post('/auto-generate-clips', async (req, res) => {
   try {
-    const { file_id, clip_timestamps, match_id } = req.body;
+    const { file_id, match_id, clip_timestamps } = req.body;
 
-    if (!file_id || !Array.isArray(clip_timestamps)) {
-      return res.status(400).json({ error: 'Missing required fields' });
+    if (!file_id || !match_id || !clip_timestamps || !Array.isArray(clip_timestamps)) {
+      return res.status(400).json({ success: false, error: 'Missing or invalid parameters' });
     }
 
-    const results = await autoGenerateClips(file_id, clip_timestamps, match_id);
-    res.json(results);
-  } catch (err) {
-    console.error('auto-generate-clips error:', err);
-    res.status(500).json({ error: 'Failed to auto generate clips' });
+    console.log('✂️ Clipping from file:', file_id);
+    console.log('📋 Actions:', clip_timestamps);
+
+    const results = await autoGenerateClips(file_id, match_id, clip_timestamps);
+
+    res.status(200).json(results);
+  } catch (error) {
+    console.error('❌ Error in /auto-generate-clips:', error.message);
+    res.status(500).json({ success: false, error: error.message });
   }
 });
 
-app.listen(port, () => {
-  console.log(`Server is running on port ${port}`);
+app.listen(PORT, () => {
+  console.log(`Server is running on port ${PORT}`);
 });
