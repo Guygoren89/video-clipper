@@ -9,11 +9,12 @@ const upload = multer({ dest: 'uploads/' });
 
 app.use(cors());
 app.use(express.json());
+app.use(express.urlencoded({ extended: true })); // חובה אם מגיע כ-urlencoded
 
 // ✅ העלאת מקטעים
 app.post('/upload-segment', upload.single('file'), async (req, res) => {
   try {
-    const { match_id, start_time, end_time } = req.body;
+    const { match_id, start_time, end_time, segment_start_time_in_game } = req.body;
     const file = req.file;
 
     console.log('📤 Uploading segment:', {
@@ -21,10 +22,18 @@ app.post('/upload-segment', upload.single('file'), async (req, res) => {
       sizeMB: (file.size / 1024 / 1024).toFixed(2),
       match_id,
       start_time,
-      end_time
+      end_time,
+      segment_start_time_in_game
     });
 
-    const uploaded = await uploadToDrive(file.path, file.originalname, match_id, start_time, end_time);
+    const uploaded = await uploadToDrive(
+      file.path,
+      file.originalname,
+      match_id,
+      start_time,
+      end_time,
+      segment_start_time_in_game
+    );
 
     res.json({ success: true, clip: uploaded });
   } catch (err) {
