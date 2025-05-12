@@ -41,24 +41,11 @@ app.post('/upload-segment', upload.single('file'), async (req, res) => {
       end_time,
     });
 
-    const clip = await uploadSegmentToDrive(file, file.originalname, match_id, start_time, end_time);
+    const uploadResult = await uploadSegmentToDrive(file, file.originalname, match_id, start_time, end_time);
 
-    console.log('✅ Upload complete:', clip);
+    console.log('✅ Upload complete:', uploadResult);
 
-    if (!clip || !clip.file_id) {
-      console.warn('⚠️ clip.file_id is missing or invalid');
-      return res.status(200).json({ success: true, clip: {} });
-    }
-
-    res.status(200).json({
-      success: true,
-      clip: {
-        google_file_id: clip.file_id,
-        name: clip.name,
-        start_time: clip.start_time,
-        end_time: clip.end_time
-      }
-    });
+    res.status(200).json(uploadResult); // שולח את התוצאה המלאה כמו שהיא
   } catch (error) {
     console.error('❌ Error in /upload-segment:', error.message);
     res.status(500).json({ success: false, error: error.message });
