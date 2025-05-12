@@ -1,53 +1,34 @@
-const fs = require('fs');
-const { google } = require('googleapis');
-const path = require('path');
+async function uploadToDrive(filePath, fileName, matchId, startTime, endTime, segmentStartTimeInGame) {
+  console.log('🚀 Uploading to Drive with metadata:', {
+    fileName,
+    matchId,
+    segmentStartTimeInGame
+  });
 
-const auth = new google.auth.GoogleAuth({
-  scopes: ['https://www.googleapis.com/auth/drive'],
-});
+  const fileMetadata = {
+    name: fileName,
+    parents: ['1vu6elArxj6YKLZePXjoqp_UFrDiI5ZOC'], // תיקיית Full_clips
+    description: `match_id: ${matchId}, segment_start_time_in_game: ${segmentStartTimeInGame}`
+  };
 
-const drive = google.drive({
-  version: 'v3',
-  auth,
-});
+  const media = {
+    mimeType: 'video/webm',
+    body: fs.createReadStream(filePath)
+  };
 
-const FULL_CLIPS_FOLDER = '1vu6elArxj6YKLZePXjoqp_UFrDiI5ZOC';
+  const driveResponse = await drive.files.create({
+    resource: fileMetadata,
+    media,
+    fields: 'id, name'
+  });
 
-async function uploadToDrive(localPath, name, match_id, start_time, end_time) {
-  try {
-    const fileMetadata = {
-      name,
-      parents: [FULL_CLIPS_FOLDER],
-    };
-
-    const media = {
-      mimeType: 'video/webm',
-      body: fs.createReadStream(localPath),
-    };
-
-    const file = await drive.files.create({
-      resource: fileMetadata,
-      media,
-      fields: 'id',
-    });
-
-    // ניקוי הקובץ המקומי (בלי לקרוס אם יש שגיאה)
-    fs.unlink(localPath, (err) => {
-      if (err) {
-        console.warn(`[WARN] שגיאה במחיקת קובץ זמני: ${localPath}`, err);
-      }
-    });
-
-    return {
-      google_file_id: file.data.id,
-      name,
-      start_time,
-      end_time,
-    };
-  } catch (error) {
-    console.error('[UPLOAD ERROR]', error);
-    throw error;
-  }
+  // מחזיר את המטאדאטה לשימוש נוסף
+  return {
+    external_id: driveResponse.data.id,
+    name: fileName,
+    match_id: matchId,
+    segment_start_time_in_game: segmentStartTimeInGame
+  };
 }
 
 module.exports = { uploadToDrive };
