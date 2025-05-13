@@ -43,7 +43,7 @@ app.post('/upload-segment', upload.single('file'), async (req, res) => {
   }
 });
 
-// ✅ חיתוך אוטומטי לפי פעולות וטווחי זמן
+// ✅ חיתוך אוטומטי לפי פעולות וטווחי זמן – גרסה מתוקנת
 app.post('/auto-generate-clips', async (req, res) => {
   try {
     const { match_id, actions, segments } = req.body;
@@ -51,28 +51,29 @@ app.post('/auto-generate-clips', async (req, res) => {
     console.log('✂️ Auto clip request received:', {
       match_id,
       actionsCount: actions.length,
-      segmentsCount: segments.length
+      segmentsCount: segments.length,
+      actions
     });
 
     const clips = [];
 
     for (const action of actions) {
-      const { action_time_in_game, action_type } = action;
+      const { timestamp_in_game, action_type } = action;
 
       const matchingSegment = segments.find(segment => {
         const start = parseInt(segment.segment_start_time_in_game);
         const end = start + parseInt(segment.duration || 20);
-        return action_time_in_game >= start && action_time_in_game < end;
+        return timestamp_in_game >= start && timestamp_in_game < end;
       });
 
       if (!matchingSegment) {
-        console.warn(`⚠️ לא נמצא מקטע עבור פעולה בזמן ${action_time_in_game}`);
+        console.warn(`⚠️ לא נמצא מקטע עבור פעולה בזמן ${timestamp_in_game}`);
         continue;
       }
 
-      const relativeTime = action_time_in_game - parseInt(matchingSegment.segment_start_time_in_game);
+      const relativeTime = timestamp_in_game - parseInt(matchingSegment.segment_start_time_in_game);
       const clipStartTime = Math.max(0, relativeTime - 8);
-      const actualDuration = relativeTime - clipStartTime;
+      const actualDuration = Math.min(8, relativeTime); // חותך אחורה עד 8 שניות אבל לא לפני תחילת המקטע
 
       console.log(`✂️ חותך קליפ מ־${clipStartTime}s למשך ${actualDuration}s מתוך קובץ ${matchingSegment.file_id}`);
 
@@ -122,6 +123,7 @@ app.post('/generate-clips', async (req, res) => {
   }
 });
 
+// ✅ הרצת שרת
 app.listen(3000, () => {
   console.log('📡 Server listening on port 3000');
 });
