@@ -1,52 +1,59 @@
+// segmentsManager.js
+
 const fs = require('fs');
 const path = require('path');
-const { exec } = require('child_process');
 const { v4: uuidv4 } = require('uuid');
+const { exec } = require('child_process');
 const { google } = require('googleapis');
 
 const SCOPES = ['https://www.googleapis.com/auth/drive'];
 const auth = new google.auth.GoogleAuth({ scopes: SCOPES });
 const drive = google.drive({ version: 'v3', auth });
 
-const SHORT_CLIPS_FOLDER = '1onJ7niZb1PE1UBvDu2yBuiW1ZCzADv2C'; // ← ודא שזה נכון
+const SHORT_CLIPS_FOLDER_ID = '1vu6elArxj6YKLZePXjoqp_UFrDiI5ZOC'; // קליפים קצרים
 
 function formatTime(seconds) {
-  const mins = String(Math.floor(seconds / 60)).padStart(2, '0');
-  const secs = String(Math.floor(seconds % 60)).padStart(2, '0');
-  return `00:${mins}:${secs}`;
+  const hrs = Math.floor(seconds / 3600);
+  const mins = Math.floor((seconds % 3600) / 60);
+  const secs = Math.floor(seconds % 60);
+  return `${pad(hrs)}:${pad(mins)}:${pad(secs)}`;
+}
+
+function pad(n) {
+  return n.toString().padStart(2, '0');
 }
 
 async function downloadFileFromDrive(fileId, destinationPath) {
   const dest = fs.createWriteStream(destinationPath);
   const res = await drive.files.get({ fileId, alt: 'media' }, { responseType: 'stream' });
 
-  return new Promise((resolve, reject) => {
+  await new Promise((resolve, reject) => {
     res.data.pipe(dest);
     dest.on('finish', resolve);
     dest.on('error', reject);
   });
 }
 
-async function uploadToDrive({ filePath, metadata, custom_name = null }) {
+async function uploadToDrive({ filePath, metadata }) {
   const fileMetadata = {
-    name: custom_name || path.basename(filePath),
-    parents: [SHORT_CLIPS_FOLDER],
-    description: `match_id: ${metadata.match_id}`,
+    name: metadata.custom_name || path.basename(filePath),
+    parents: [SHORT_CLIPS_FOLDER_ID],
+    description: `match_id: ${metadata.match_id}, action_type: ${metadata.action_type}`,
     properties: {
       match_id: metadata.match_id,
-      action_type: metadata.action_type || 'clip'
+      action_type: metadata.action_type,
     }
   };
 
   const media = {
     mimeType: 'video/webm',
-    body: fs.createReadStream(filePath)
+    body: fs.createReadStream(filePath),
   };
 
   const res = await drive.files.create({
     requestBody: fileMetadata,
     media,
-    fields: 'id, webViewLink, webContentLink'
+    fields: 'id',
   });
 
   const fileId = res.data.id;
@@ -55,39 +62,35 @@ async function uploadToDrive({ filePath, metadata, custom_name = null }) {
     fileId,
     requestBody: {
       role: 'reader',
-      type: 'anyone'
-    }
+      type: 'anyone',
+    },
   });
 
+  const viewUrl = `https://drive.google.com/file/d/${fileId}/view`;
+  const downloadUrl = `https://drive.google.com/uc?export=download&id=${fileId}`;
+
   return {
-    external_id: metadata.clip_id,
+    external_id: fileId,
     name: fileMetadata.name,
-    view_url: res.data.webViewLink,
-    download_url: res.data.webContentLink,
+    view_url: viewUrl,
+    download_url: downloadUrl,
+    thumbnail_url: '',
     duration: metadata.duration,
-    created_date: metadata.created_date,
+    created_date: new Date().toISOString(),
     match_id: metadata.match_id,
-    player_id: metadata.player_id,
-    player_name: metadata.player_name,
     action_type: metadata.action_type
   };
 }
 
-async function cutClipFromDriveFile({
-  fileId,
-  matchId,
-  startTimeInSec,
-  durationInSec,
-  actionType = 'auto_clip'
-}) {
-  const inputPath = `/tmp/input_${Date.now()}.webm`;
-  const outputId = uuidv4();
-  const outputPath = `/tmp/clip_${outputId}.webm`;
+async function cutClipFromDriveFile({ fileId, startTimeInSec, durationInSec, matchId, actionType }) {
+  const inputPath = `/tmp/input_${fileId}.webm`;
+  const clipId = uuidv4();
+  const outputPath = `/tmp/clip_${clipId}.webm`;
 
   await downloadFileFromDrive(fileId, inputPath);
 
   const command = `ffmpeg -ss ${startTimeInSec} -i ${inputPath} -t ${durationInSec} -c:v libvpx -an -y ${outputPath}`;
-  console.log('🎬 FFmpeg command:', command);
+  console.log('🎬 FFmpeg:', command);
 
   await new Promise((resolve, reject) => {
     exec(command, (err) => {
@@ -99,13 +102,12 @@ async function cutClipFromDriveFile({
   const uploaded = await uploadToDrive({
     filePath: outputPath,
     metadata: {
-      clip_id: outputId,
       match_id: matchId,
+      action_type: actionType,
+      duration: durationInSec,
       created_date: new Date().toISOString(),
-      duration: durationInSec.toString(),
-      action_type: actionType
-    },
-    custom_name: `clip_${matchId}_${outputId}.webm`
+      custom_name: `clip_${matchId}_${clipId}.webm`,
+    }
   });
 
   // ניקוי קבצים זמניים
