@@ -73,7 +73,7 @@ app.post('/auto-generate-clips', async (req, res) => {
 
       const relativeTime = timestamp_in_game - parseInt(matchingSegment.segment_start_time_in_game);
       const clipStartTime = Math.max(0, relativeTime - 8);
-      const actualDuration = Math.min(8, relativeTime); // חותך אחורה עד 8 שניות אבל לא לפני תחילת המקטע
+      const actualDuration = Math.min(8, relativeTime); // עד 8 שניות אחורה, בלי חיתוך שלילי
 
       console.log(`✂️ חותך קליפ מ־${clipStartTime}s למשך ${actualDuration}s מתוך קובץ ${matchingSegment.file_id}`);
 
