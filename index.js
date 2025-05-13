@@ -43,7 +43,7 @@ app.post('/upload-segment', upload.single('file'), async (req, res) => {
   }
 });
 
-// ✅ חיתוך אוטומטי לפי פעולות וטווחי זמן – גרסה מתוקנת
+// ✅ חיתוך אוטומטי לפי פעולות וטווחי זמן – כולל תיקון שם שדה ו-logics מלא
 app.post('/auto-generate-clips', async (req, res) => {
   try {
     const { match_id, actions, segments } = req.body;
@@ -73,7 +73,7 @@ app.post('/auto-generate-clips', async (req, res) => {
 
       const relativeTime = timestamp_in_game - parseInt(matchingSegment.segment_start_time_in_game);
       const clipStartTime = Math.max(0, relativeTime - 8);
-      const actualDuration = Math.min(8, relativeTime); // עד 8 שניות אחורה, בלי חיתוך שלילי
+      const actualDuration = Math.min(8, relativeTime); // מקסימום 8 שניות אחורה בלבד
 
       console.log(`✂️ חותך קליפ מ־${clipStartTime}s למשך ${actualDuration}s מתוך קובץ ${matchingSegment.file_id}`);
 
@@ -95,7 +95,7 @@ app.post('/auto-generate-clips', async (req, res) => {
   }
 });
 
-// (רשות) חיתוך לפי fileId ישיר
+// ✅ חיתוך ידני (רשות)
 app.post('/generate-clips', async (req, res) => {
   try {
     const { file_id, match_id, start_time, duration, action_type } = req.body;
