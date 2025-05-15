@@ -1,3 +1,5 @@
+// segmentsManager.js
+
 const fs = require('fs');
 const path = require('path');
 const { v4: uuidv4 } = require('uuid');
@@ -8,7 +10,7 @@ const SCOPES = ['https://www.googleapis.com/auth/drive'];
 const auth = new google.auth.GoogleAuth({ scopes: SCOPES });
 const drive = google.drive({ version: 'v3', auth });
 
-// ✅ התיקייה הנכונה לקליפים קצרים (8 שניות)
+// ✅ תיקייה לקליפים קצרים (8 שניות)
 const SHORT_CLIPS_FOLDER_ID = '1Lb0MSD-CKIsy1XCqb4b4ROvvGidqtmzU';
 
 function formatTime(seconds) {
@@ -25,6 +27,7 @@ function pad(n) {
 async function downloadFileFromDrive(fileId, destinationPath) {
   const dest = fs.createWriteStream(destinationPath);
   const res = await drive.files.get({ fileId, alt: 'media' }, { responseType: 'stream' });
+
   await new Promise((resolve, reject) => {
     res.data.pipe(dest);
     dest.on('finish', resolve);
