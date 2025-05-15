@@ -1,5 +1,3 @@
-// segmentsManager.js
-
 const fs = require('fs');
 const path = require('path');
 const { v4: uuidv4 } = require('uuid');
@@ -10,7 +8,8 @@ const SCOPES = ['https://www.googleapis.com/auth/drive'];
 const auth = new google.auth.GoogleAuth({ scopes: SCOPES });
 const drive = google.drive({ version: 'v3', auth });
 
-const SHORT_CLIPS_FOLDER_ID = '1vu6elArxj6YKLZePXjoqp_UFrDiI5ZOC'; // קליפים קצרים
+// ✅ התיקייה הנכונה לקליפים קצרים (8 שניות)
+const SHORT_CLIPS_FOLDER_ID = '1Lb0MSD-CKIsy1XCqb4b4ROvvGidqtmzU';
 
 function formatTime(seconds) {
   const hrs = Math.floor(seconds / 3600);
@@ -26,7 +25,6 @@ function pad(n) {
 async function downloadFileFromDrive(fileId, destinationPath) {
   const dest = fs.createWriteStream(destinationPath);
   const res = await drive.files.get({ fileId, alt: 'media' }, { responseType: 'stream' });
-
   await new Promise((resolve, reject) => {
     res.data.pipe(dest);
     dest.on('finish', resolve);
@@ -110,7 +108,6 @@ async function cutClipFromDriveFile({ fileId, startTimeInSec, durationInSec, mat
     }
   });
 
-  // ניקוי קבצים זמניים
   if (fs.existsSync(inputPath)) fs.unlinkSync(inputPath);
   if (fs.existsSync(outputPath)) fs.unlinkSync(outputPath);
 
