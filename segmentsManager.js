@@ -1,5 +1,3 @@
-// segmentsManager.js
-
 const fs = require('fs');
 const path = require('path');
 const { v4: uuidv4 } = require('uuid');
@@ -10,7 +8,9 @@ const SCOPES = ['https://www.googleapis.com/auth/drive'];
 const auth = new google.auth.GoogleAuth({ scopes: SCOPES });
 const drive = google.drive({ version: 'v3', auth });
 
-// ✅ תיקייה לקליפים קצרים (8 שניות)
+// תיקייה לקליפים באורך 20 שניות
+const FULL_CLIPS_FOLDER_ID = '1vu6elArxj6YKLZePXjoqp_UFrDiI5ZOC';
+// תיקייה לקליפים קצרים של 8 שניות
 const SHORT_CLIPS_FOLDER_ID = '1Lb0MSD-CKIsy1XCqb4b4ROvvGidqtmzU';
 
 function formatTime(seconds) {
@@ -35,14 +35,17 @@ async function downloadFileFromDrive(fileId, destinationPath) {
   });
 }
 
-async function uploadToDrive({ filePath, metadata }) {
+async function uploadToDriveUnified({ filePath, metadata, isFullClip = false }) {
+  const folderId = isFullClip ? FULL_CLIPS_FOLDER_ID : SHORT_CLIPS_FOLDER_ID;
+
   const fileMetadata = {
     name: metadata.custom_name || path.basename(filePath),
-    parents: [SHORT_CLIPS_FOLDER_ID],
+    parents: [folderId],
     description: `match_id: ${metadata.match_id}, action_type: ${metadata.action_type}`,
     properties: {
       match_id: metadata.match_id,
       action_type: metadata.action_type,
+      segment_start_time_in_game: metadata.segment_start_time_in_game?.toString() || '',
     }
   };
 
@@ -67,14 +70,11 @@ async function uploadToDrive({ filePath, metadata }) {
     },
   });
 
-  const viewUrl = `https://drive.google.com/file/d/${fileId}/view`;
-  const downloadUrl = `https://drive.google.com/uc?export=download&id=${fileId}`;
-
   return {
     external_id: fileId,
     name: fileMetadata.name,
-    view_url: viewUrl,
-    download_url: downloadUrl,
+    view_url: `https://drive.google.com/file/d/${fileId}/view`,
+    download_url: `https://drive.google.com/uc?export=download&id=${fileId}`,
     thumbnail_url: '',
     duration: metadata.duration,
     created_date: new Date().toISOString(),
@@ -100,7 +100,7 @@ async function cutClipFromDriveFile({ fileId, startTimeInSec, durationInSec, mat
     });
   });
 
-  const uploaded = await uploadToDrive({
+  const uploaded = await uploadToDriveUnified({
     filePath: outputPath,
     metadata: {
       match_id: matchId,
@@ -108,7 +108,8 @@ async function cutClipFromDriveFile({ fileId, startTimeInSec, durationInSec, mat
       duration: durationInSec,
       created_date: new Date().toISOString(),
       custom_name: `clip_${matchId}_${clipId}.webm`,
-    }
+    },
+    isFullClip: false
   });
 
   if (fs.existsSync(inputPath)) fs.unlinkSync(inputPath);
@@ -119,5 +120,6 @@ async function cutClipFromDriveFile({ fileId, startTimeInSec, durationInSec, mat
 
 module.exports = {
   formatTime,
-  cutClipFromDriveFile
+  cutClipFromDriveFile,
+  uploadToDrive: uploadToDriveUnified // משמש גם להעלאת מקטעים מלאים
 };
