@@ -1,17 +1,17 @@
-const { cutClip } = require('./segmentsManager');
+const { cutClipFromDriveFile } = require('./segmentsManager');
 
 async function autoGenerateClips(fileId, clipTimestamps, matchId = "auto_match") {
   const results = [];
 
   for (const { start_time_in_segment, duration = 8, action_type = "auto_clip" } of clipTimestamps) {
     try {
-      const result = await cutClip(
+      const result = await cutClipFromDriveFile({
         fileId,
-        start_time_in_segment,
-        duration,
+        startTimeInSec: start_time_in_segment,
+        durationInSec: duration,
         matchId,
-        action_type
-      );
+        actionType: action_type
+      });
       results.push(result);
     } catch (err) {
       results.push({
