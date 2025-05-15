@@ -55,10 +55,10 @@ app.post('/auto-generate-clips', async (req, res) => {
       actions
     });
 
-    // שולחים תשובה מיידית
+    // תגובה מיידית ללקוח
     res.json({ success: true, message: 'Clip generation started in background' });
 
-    // ממשיכים ברקע
+    // המשך טיפול ברקע
     for (const action of actions) {
       const { timestamp_in_game, action_type } = action;
 
@@ -75,7 +75,7 @@ app.post('/auto-generate-clips', async (req, res) => {
 
       const relativeTime = timestamp_in_game - parseInt(matchingSegment.segment_start_time_in_game);
       const clipStartTime = Math.max(0, relativeTime - 8);
-      const actualDuration = Math.min(8, relativeTime); // קטע אחורה בלבד
+      const actualDuration = Math.min(8, relativeTime);
 
       console.log(`✂️ חותך קליפ מ־${clipStartTime}s למשך ${actualDuration}s מתוך קובץ ${matchingSegment.file_id}`);
 
@@ -94,11 +94,11 @@ app.post('/auto-generate-clips', async (req, res) => {
 
   } catch (err) {
     console.error('[CLIP ERROR]', err);
-    // לא מחזירים כאן res כי התגובה כבר נשלחה
+    // אין res כי כבר נשלח
   }
 });
 
-// ✅ חיתוך ידני (לצורכי דיבוג/בדיקה)
+// ✅ חיתוך ידני לבדיקה
 app.post('/generate-clips', async (req, res) => {
   try {
     const { file_id, match_id, start_time, duration, action_type } = req.body;
