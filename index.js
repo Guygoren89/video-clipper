@@ -2,8 +2,11 @@ const express = require('express');
 const cors = require('cors');
 const multer = require('multer');
 const fs = require('fs');
-const { uploadToDrive } = require('./driveUploader');
-const { formatTime, cutClipFromDriveFile } = require('./segmentsManager');
+const {
+  uploadToDrive,
+  formatTime,
+  cutClipFromDriveFile
+} = require('./segmentsManager');
 
 const app = express();
 const upload = multer({ dest: 'uploads/' });
@@ -12,7 +15,7 @@ app.use(cors());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// ✅ העלאת מקטעים
+// ✅ העלאת מקטעים (20 שניות)
 app.post('/upload-segment', upload.single('file'), async (req, res) => {
   try {
     const { match_id, start_time, end_time, segment_start_time_in_game } = req.body;
@@ -27,14 +30,17 @@ app.post('/upload-segment', upload.single('file'), async (req, res) => {
       segment_start_time_in_game
     });
 
-    const uploaded = await uploadToDrive(
-      file.path,
-      file.originalname,
-      match_id,
-      start_time,
-      end_time,
-      segment_start_time_in_game
-    );
+    const uploaded = await uploadToDrive({
+      filePath: file.path,
+      metadata: {
+        match_id,
+        action_type: 'segment_upload',
+        duration: '20',
+        created_date: new Date().toISOString(),
+        segment_start_time_in_game,
+        custom_name: file.originalname
+      }
+    });
 
     res.json({ success: true, clip: uploaded });
   } catch (err) {
@@ -43,7 +49,7 @@ app.post('/upload-segment', upload.single('file'), async (req, res) => {
   }
 });
 
-// ✅ חיתוך אוטומטי – תגובה מיידית, חיתוך ברקע
+// ✅ חיתוך אוטומטי ברקע (8 שניות)
 app.post('/auto-generate-clips', async (req, res) => {
   try {
     const { match_id, actions, segments } = req.body;
@@ -55,10 +61,8 @@ app.post('/auto-generate-clips', async (req, res) => {
       actions
     });
 
-    // תגובה מיידית ללקוח
     res.json({ success: true, message: 'Clip generation started in background' });
 
-    // המשך טיפול ברקע
     for (const action of actions) {
       const { timestamp_in_game, action_type } = action;
 
@@ -94,7 +98,6 @@ app.post('/auto-generate-clips', async (req, res) => {
 
   } catch (err) {
     console.error('[CLIP ERROR]', err);
-    // אין res כי כבר נשלח
   }
 });
 
@@ -126,6 +129,7 @@ app.post('/generate-clips', async (req, res) => {
   }
 });
 
+// ✅ הרצת שרת
 app.listen(3000, () => {
   console.log('📡 Server listening on port 3000');
 });
