@@ -90,7 +90,8 @@ async function cutClipFromDriveFile({ fileId, startTimeInSec, durationInSec, mat
 
   await downloadFileFromDrive(fileId, inputPath);
 
-  const command = `ffmpeg -ss ${startTimeInSec} -i ${inputPath} -t ${durationInSec} -c:v libvpx -an -y ${outputPath}`;
+  // שימוש ב־-c copy לחיתוך מהיר לפי keyframes
+  const command = `ffmpeg -ss ${startTimeInSec} -i ${inputPath} -t ${durationInSec} -c copy -y ${outputPath}`;
   console.log('🎬 FFmpeg:', command);
 
   await new Promise((resolve, reject) => {
@@ -121,5 +122,5 @@ async function cutClipFromDriveFile({ fileId, startTimeInSec, durationInSec, mat
 module.exports = {
   formatTime,
   cutClipFromDriveFile,
-  uploadToDrive: uploadToDriveUnified // משמש גם להעלאת מקטעים מלאים
+  uploadToDrive: uploadToDriveUnified
 };
