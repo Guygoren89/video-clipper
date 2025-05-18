@@ -8,9 +8,7 @@ const SCOPES = ['https://www.googleapis.com/auth/drive'];
 const auth = new google.auth.GoogleAuth({ scopes: SCOPES });
 const drive = google.drive({ version: 'v3', auth });
 
-// תיקייה לקליפים באורך 20 שניות
 const FULL_CLIPS_FOLDER_ID = '1vu6elArxj6YKLZePXjoqp_UFrDiI5ZOC';
-// תיקייה לקליפים קצרים של 8 שניות
 const SHORT_CLIPS_FOLDER_ID = '1Lb0MSD-CKIsy1XCqb4b4ROvvGidqtmzU';
 
 function formatTime(seconds) {
@@ -41,10 +39,11 @@ async function uploadToDriveUnified({ filePath, metadata, isFullClip = false }) 
   const fileMetadata = {
     name: metadata.custom_name || path.basename(filePath),
     parents: [folderId],
-    description: `match_id: ${metadata.match_id}, action_type: ${metadata.action_type}`,
+    description: `match_id: ${metadata.match_id}, action_type: ${metadata.action_type}, player_name: ${metadata.player_name || ''}`,
     properties: {
       match_id: metadata.match_id,
       action_type: metadata.action_type,
+      player_name: metadata.player_name || '',
       segment_start_time_in_game: metadata.segment_start_time_in_game?.toString() || '',
     }
   };
@@ -79,18 +78,18 @@ async function uploadToDriveUnified({ filePath, metadata, isFullClip = false }) 
     duration: metadata.duration,
     created_date: new Date().toISOString(),
     match_id: metadata.match_id,
-    action_type: metadata.action_type
+    action_type: metadata.action_type,
+    player_name: metadata.player_name || ''
   };
 }
 
-async function cutClipFromDriveFile({ fileId, startTimeInSec, durationInSec, matchId, actionType }) {
+async function cutClipFromDriveFile({ fileId, startTimeInSec, durationInSec, matchId, actionType, playerName }) {
   const inputPath = `/tmp/input_${fileId}.webm`;
   const clipId = uuidv4();
   const outputPath = `/tmp/clip_${clipId}.webm`;
 
   await downloadFileFromDrive(fileId, inputPath);
 
-  // שימוש ב־-c copy לחיתוך מהיר לפי keyframes
   const command = `ffmpeg -ss ${startTimeInSec} -i ${inputPath} -t ${durationInSec} -c copy -y ${outputPath}`;
   console.log('🎬 FFmpeg:', command);
 
@@ -106,6 +105,7 @@ async function cutClipFromDriveFile({ fileId, startTimeInSec, durationInSec, mat
     metadata: {
       match_id: matchId,
       action_type: actionType,
+      player_name: playerName,
       duration: durationInSec,
       created_date: new Date().toISOString(),
       custom_name: `clip_${matchId}_${clipId}.webm`,
