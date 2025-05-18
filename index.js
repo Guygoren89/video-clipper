@@ -31,7 +31,7 @@ app.post('/upload-segment', upload.single('file'), async (req, res) => {
       metadata: {
         custom_name: file.originalname,
         match_id,
-        duration: end_time || "00:00:20", // ברירת מחדל אם אין end_time
+        duration: end_time || "00:00:20",
         segment_start_time_in_game
       }
     });
@@ -55,12 +55,10 @@ app.post('/auto-generate-clips', async (req, res) => {
       actions
     });
 
-    // תגובה מיידית ללקוח
     res.json({ success: true, message: 'Clip generation started in background' });
 
-    // המשך טיפול ברקע
     for (const action of actions) {
-      const { timestamp_in_game, action_type } = action;
+      const { timestamp_in_game, action_type, player_name } = action;
 
       const matchingSegment = segments.find(segment => {
         const start = parseInt(segment.segment_start_time_in_game);
@@ -85,7 +83,8 @@ app.post('/auto-generate-clips', async (req, res) => {
           matchId: match_id,
           startTimeInSec: formatTime(clipStartTime),
           durationInSec: actualDuration,
-          actionType: action_type
+          actionType: action_type,
+          playerName: player_name || ''
         });
       } catch (err) {
         console.error(`[ERROR] חיתוך קליפ נכשל: ${err.message}`);
@@ -100,14 +99,15 @@ app.post('/auto-generate-clips', async (req, res) => {
 // ✅ חיתוך ידני לבדיקה
 app.post('/generate-clips', async (req, res) => {
   try {
-    const { file_id, match_id, start_time, duration, action_type } = req.body;
+    const { file_id, match_id, start_time, duration, action_type, player_name } = req.body;
 
     console.log('✂️ Manual clip request:', {
       file_id,
       match_id,
       start_time,
       duration,
-      action_type
+      action_type,
+      player_name
     });
 
     const clip = await cutClipFromDriveFile({
@@ -115,7 +115,8 @@ app.post('/generate-clips', async (req, res) => {
       matchId: match_id,
       startTimeInSec: formatTime(start_time),
       durationInSec: duration,
-      actionType: action_type
+      actionType: action_type,
+      playerName: player_name || ''
     });
 
     res.json({ success: true, clip });
@@ -125,7 +126,6 @@ app.post('/generate-clips', async (req, res) => {
   }
 });
 
-// ✅ הרצת השרת
 app.listen(3000, () => {
   console.log('📡 Server listening on port 3000');
 });
