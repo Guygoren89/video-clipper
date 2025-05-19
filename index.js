@@ -1,5 +1,5 @@
 // ============================================================================
-// index.js  – FULL FILE (with isFullClip:true fix)
+// index.js  – FULL FILE (Full_clips upload + auto-generate clips)
 // ============================================================================
 
 const express  = require('express');
@@ -18,7 +18,7 @@ const app    = express();
 const upload = multer({ dest: 'uploads/' });
 
 app.use(cors());
-app.use(express.json());
+app.use(express.json({ limit: '10mb' }));     // handle JSON payloads
 app.use(express.urlencoded({ extended: true }));
 
 // ──────────────────────────────────
@@ -27,7 +27,7 @@ app.use(express.urlencoded({ extended: true }));
 app.get('/health', (_, res) => res.send('OK'));
 
 // ──────────────────────────────────
-// 1. 20-second SEGMENT UPLOAD
+// 1. 20-second SEGMENT UPLOAD  → Full_clips
 // ──────────────────────────────────
 app.post('/upload-segment', upload.single('file'), async (req, res) => {
   try {
@@ -44,65 +44,66 @@ app.post('/upload-segment', upload.single('file'), async (req, res) => {
     });
 
     const uploaded = await uploadToDrive({
-      filePath: file.path,
-      metadata: {
+      filePath : file.path,
+      metadata : {
         custom_name              : file.originalname,
         match_id,
         duration                 : end_time || '00:00:20',
         segment_start_time_in_game
       },
-      isFullClip: true                       // <-- sends to Full_clips folder
+      isFullClip: true                           // ⬅️ sends to Full_clips
     });
 
-    res.json({ success: true, clip: uploaded });
+    return res.json({ success: true, clip: uploaded });
   } catch (err) {
     console.error('[UPLOAD ERROR]', err);
-    res.status(500).json({ success: false, error: err.message });
+    return res.status(500).json({ success: false, error: err.message });
   }
 });
 
 // ──────────────────────────────────
-// 2. AUTO-GENERATE CLIPS
+// 2. AUTO-GENERATE CLIPS  (8-s) → Short_clips
 // ──────────────────────────────────
 app.post('/auto-generate-clips', async (req, res) => {
   try {
-    const { match_id, actions, segments } = req.body;
+    const { match_id, actions = [], segments = [] } = req.body;
 
     console.log('✂️ Auto clip request received:', {
       match_id,
       actionsCount  : actions.length,
-      segmentsCount : segments.length,
-      actions
+      segmentsCount : segments.length
     });
 
+    // immediate response to client
     res.json({ success: true, message: 'Clip generation started in background' });
 
+    // background processing
     for (const action of actions) {
       const { timestamp_in_game, action_type, player_name } = action;
 
-      const matchingSegment = segments.find(segment => {
-        const start = parseInt(segment.segment_start_time_in_game);
-        const end   = start + parseInt(segment.duration || 20);
-        return timestamp_in_game >= start && timestamp_in_game < end;
+      const seg = segments.find(s => {
+        const segStart = parseInt(s.segment_start_time_in_game);
+        const segEnd   = segStart + parseInt(s.duration || 20);
+        return timestamp_in_game >= segStart && timestamp_in_game < segEnd;
       });
 
-      if (!matchingSegment) {
+      if (!seg) {
         console.warn(`⚠️ No segment for action at ${timestamp_in_game}s`);
         continue;
       }
 
-      const relativeTime   = timestamp_in_game - parseInt(matchingSegment.segment_start_time_in_game);
-      const clipStartTime  = Math.max(0, relativeTime - 8);
-      const actualDuration = Math.min(8, relativeTime);
+      const relative  = timestamp_in_game - parseInt(seg.segment_start_time_in_game);
+      const startSec  = Math.max(0, relative - 8);
+      const durSec    = Math.min(8, relative);
 
-      console.log(`✂️ Cutting clip from ${clipStartTime}s (dur ${actualDuration}s) file ${matchingSegment.file_id}`);
+      console.log(`✂️ Cutting clip ${seg.file_id} @${startSec}s for ${durSec}s`);
 
       try {
         await cutClipFromDriveFile({
-          fileId        : matchingSegment.file_id,
+          fileId        : seg.file_id,
           matchId       : match_id,
-          startTimeInSec: formatTime(clipStartTime),
-          durationInSec : actualDuration,
+          startTimeInSec: formatTime(startSec),
+          durationInSec : durSec,
           actionType    : action_type,
           playerName    : player_name || ''
         });
@@ -112,11 +113,12 @@ app.post('/auto-generate-clips', async (req, res) => {
     }
   } catch (err) {
     console.error('[CLIP ERROR]', err);
+    // cannot reply twice; log only
   }
 });
 
 // ──────────────────────────────────
-// 3. MANUAL CLIP (debug)
+// 3. MANUAL CLIP (debug endpoint)
 // ──────────────────────────────────
 app.post('/generate-clips', async (req, res) => {
   try {
@@ -140,10 +142,10 @@ app.post('/generate-clips', async (req, res) => {
       playerName    : player_name || ''
     });
 
-    res.json({ success: true, clip });
+    return res.json({ success: true, clip });
   } catch (err) {
     console.error('[MANUAL CLIP ERROR]', err);
-    res.status(500).json({ success: false, error: err.message });
+    return res.status(500).json({ success: false, error: err.message });
   }
 });
 
