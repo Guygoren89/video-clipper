@@ -1,14 +1,8 @@
-// ============================================================================
-// index.js  – FULL FILE  (Full_clips upload  +  auto-generate clips)
-// ✓   יוצר מזהה-משחק ייחודי לכל סשן
-// ✓   שומר מפת-מיפוי  original → unique  בזיכרון  
-// ✓   משתמש במזהה הייחודי בכל נקודות השרת
-// ============================================================================
-
 const express  = require('express');
 const cors     = require('cors');
 const multer   = require('multer');
 const fs       = require('fs');
+const { google } = require('googleapis');
 
 const {
   uploadToDrive,
@@ -17,17 +11,20 @@ const {
 } = require('./segmentsManager');
 
 // ────────────────────────────────────────────────────────────────────────────
-// in-memory map:  { originalMatchId : uniqueMatchId }
+const SCOPES = ['https://www.googleapis.com/auth/drive'];
+const auth = new google.auth.GoogleAuth({ scopes: SCOPES });
+const drive = google.drive({ version: 'v3', auth });
+const SHORT_CLIPS_FOLDER_ID = '1Lb0MSD-CKIsy1XCqb4b4ROvvGidqtmzU';
+
+// ────────────────────────────────────────────────────────────────────────────
 const matchIdMap = Object.create(null);
 function resolveMatchId(origId, segStart) {
-  // "ראשון" הוא הסגמנט שמתחיל בזמן-משחק 0
   const isFirstSegment = Number(segStart) === 0;
-
   if (!matchIdMap[origId] && isFirstSegment) {
-    matchIdMap[origId] = `${origId}_${Date.now()}`;   // יוצר מזהה חד-פעמי
+    matchIdMap[origId] = `${origId}_${Date.now()}`;
     console.log(`🆕  New matchId created → ${matchIdMap[origId]}`);
   }
-  return matchIdMap[origId] || origId;                // fallback ל-origId
+  return matchIdMap[origId] || origId;
 }
 // ────────────────────────────────────────────────────────────────────────────
 
@@ -39,21 +36,13 @@ app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
 
 // ──────────────────────────────────
-// 0.  HEALTH CHECK
-// ──────────────────────────────────
 app.get('/health', (_, res) => res.send('OK'));
 
 // ──────────────────────────────────
-// 1.  20-second SEGMENT UPLOAD  → Full_clips
-// ──────────────────────────────────
 app.post('/upload-segment', upload.single('file'), async (req, res) => {
   try {
-    const { match_id: origMatchId,
-            start_time,
-            end_time,
-            segment_start_time_in_game } = req.body;
+    const { match_id: origMatchId, start_time, end_time, segment_start_time_in_game } = req.body;
     const file = req.file;
-
     const matchId = resolveMatchId(origMatchId, segment_start_time_in_game);
 
     console.log('📤 Uploading segment:', {
@@ -84,8 +73,6 @@ app.post('/upload-segment', upload.single('file'), async (req, res) => {
 });
 
 // ──────────────────────────────────
-// 2.  AUTO-GENERATE CLIPS  (8-s) → Short_clips
-// ──────────────────────────────────
 app.post('/auto-generate-clips', async (req, res) => {
   try {
     const { match_id: origMatchId, actions = [], segments = [] } = req.body;
@@ -97,10 +84,8 @@ app.post('/auto-generate-clips', async (req, res) => {
       segmentsCount : segments.length
     });
 
-    // מיד שולח תשובה כדי לא לחסום את הקליינט
     res.json({ success: true, message: 'Clip generation started in background', match_id: matchId });
 
-    // עיבוד ברקע
     for (const action of actions) {
       const { timestamp_in_game, action_type, player_name } = action;
 
@@ -136,12 +121,9 @@ app.post('/auto-generate-clips', async (req, res) => {
     }
   } catch (err) {
     console.error('[CLIP ERROR]', err);
-    /* אי-אפשר לענות פעמיים; רק לוג */
   }
 });
 
-// ──────────────────────────────────
-// 3.  MANUAL CLIP (debug endpoint)
 // ──────────────────────────────────
 app.post('/generate-clips', async (req, res) => {
   try {
@@ -173,7 +155,35 @@ app.post('/generate-clips', async (req, res) => {
 });
 
 // ──────────────────────────────────
-// START SERVER
+// ✅ תוספת – תואמת לגמרי לקוד שלך, לא נוגעת בתשתיות הקיימות
+app.get('/clips', async (req, res) => {
+  try {
+    const list = await drive.files.list({
+      q: `'${SHORT_CLIPS_FOLDER_ID}' in parents and trashed = false`,
+      fields: 'files(id, name, createdTime, properties)',
+      orderBy: 'createdTime desc'
+    });
+
+    const clips = list.data.files.map(file => ({
+      external_id   : file.id,
+      name          : file.name,
+      view_url      : `https://drive.google.com/file/d/${file.id}/view`,
+      download_url  : `https://drive.google.com/uc?export=download&id=${file.id}`,
+      thumbnail_url : '',
+      duration      : '',
+      created_date  : file.createdTime,
+      match_id      : file.properties?.match_id || '',
+      action_type   : file.properties?.action_type || '',
+      player_name   : file.properties?.player_name || ''
+    }));
+
+    res.json(clips);
+  } catch (err) {
+    console.error('[ERROR] Failed to load clips from Drive:', err.message);
+    res.status(500).json({ error: 'Failed to load clips from Drive' });
+  }
+});
+
 // ──────────────────────────────────
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
