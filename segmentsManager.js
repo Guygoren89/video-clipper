@@ -1,11 +1,3 @@
-// ============================================================================
-// index.js  – FULL FILE  (Full_clips upload  +  auto-generate clips + GET /clips)
-// ✓ יוצר מזהה-משחק ייחודי לכל סשן
-// ✓ שומר מפת-מיפוי original → unique בזיכרון  
-// ✓ משתמש במזהה הייחודי בכל נקודות השרת
-// ✓ כולל endpoint להצגת כל הקליפים הקצרים מה-Drive
-// ============================================================================
-
 const express  = require('express');
 const cors     = require('cors');
 const multer   = require('multer');
@@ -183,7 +175,7 @@ app.get('/clips', async (req, res) => {
   }
 });
 
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT;
 app.listen(PORT, () => {
   console.log(`📡 Server listening on port ${PORT}`);
 });
