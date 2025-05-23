@@ -26,16 +26,17 @@ function resolveMatchId(origId, segStart) {
   }
   return matchIdMap[origId] || origId;
 }
-
 // ────────────────────────────────────────────────────────────────────────────
+
 const app    = express();
 const upload = multer({ dest: 'uploads/' });
 
-// ✅ הגדרת CORS נכונה לאפליקציית Base44
+// ✅ הרשאות CORS מותאמות ל-Base44
 app.use(cors({
-  origin: 'https://app.base44.com', // ← החלף לכתובת שלך אם שונה
-  methods: ['GET', 'POST'],
-  allowedHeaders: ['Content-Type']
+  origin: [
+    'https://app.base44.com',
+    'https://preview--2000-f1d18643.base44.app'
+  ]
 }));
 
 app.use(express.json({ limit: '10mb' }));
