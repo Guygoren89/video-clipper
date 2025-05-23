@@ -26,12 +26,18 @@ function resolveMatchId(origId, segStart) {
   }
   return matchIdMap[origId] || origId;
 }
-// ────────────────────────────────────────────────────────────────────────────
 
+// ────────────────────────────────────────────────────────────────────────────
 const app    = express();
 const upload = multer({ dest: 'uploads/' });
 
-app.use(cors());
+// ✅ הגדרת CORS נכונה לאפליקציית Base44
+app.use(cors({
+  origin: 'https://app.base44.com', // ← החלף לכתובת שלך אם שונה
+  methods: ['GET', 'POST'],
+  allowedHeaders: ['Content-Type']
+}));
+
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
 
@@ -155,7 +161,6 @@ app.post('/generate-clips', async (req, res) => {
 });
 
 // ──────────────────────────────────
-// ✅ תוספת יחידה – מחזיר קליפים קצרים ל-Base44
 app.get('/clips', async (req, res) => {
   try {
     const list = await drive.files.list({
