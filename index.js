@@ -155,7 +155,7 @@ app.post('/generate-clips', async (req, res) => {
 });
 
 // ──────────────────────────────────
-// ✅ תוספת – תואמת לגמרי לקוד שלך, לא נוגעת בתשתיות הקיימות
+// ✅ תוספת יחידה – מחזיר קליפים קצרים ל-Base44
 app.get('/clips', async (req, res) => {
   try {
     const list = await drive.files.list({
