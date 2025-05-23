@@ -147,6 +147,7 @@ app.post('/generate-clips', async (req, res) => {
   }
 });
 
+// ✅ תוספת: GET /clips – הצגת קליפים קצרים מה-Drive
 app.get('/clips', async (req, res) => {
   try {
     const list = await drive.files.list({
@@ -175,7 +176,8 @@ app.get('/clips', async (req, res) => {
   }
 });
 
-const PORT = process.env.PORT;
+// ✅ חשוב: פתיחת השרת כמו שהיה אצלך
+const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`📡 Server listening on port ${PORT}`);
 });
