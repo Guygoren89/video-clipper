@@ -15,7 +15,7 @@ function formatTime(seconds) {
   const hrs = Math.floor(seconds / 3600);
   const mins = Math.floor((seconds % 3600) / 60);
   const secs = Math.floor(seconds % 60);
-  return ${pad(hrs)}:${pad(mins)}:${pad(secs)};
+  return `${pad(hrs)}:${pad(mins)}:${pad(secs)}`;
 }
 
 function pad(n) {
@@ -39,7 +39,7 @@ async function uploadToDriveUnified({ filePath, metadata, isFullClip = false }) 
   const fileMetadata = {
     name: metadata.custom_name || path.basename(filePath),
     parents: [folderId],
-    description: match_id: ${metadata.match_id}, action_type: ${metadata.action_type}, player_name: ${metadata.player_name || ''},
+    description: `match_id: ${metadata.match_id}, action_type: ${metadata.action_type}, player_name: ${metadata.player_name || ''}`,
     properties: {
       match_id: metadata.match_id,
       action_type: metadata.action_type,
@@ -72,8 +72,8 @@ async function uploadToDriveUnified({ filePath, metadata, isFullClip = false }) 
   return {
     external_id: fileId,
     name: fileMetadata.name,
-    view_url: https://drive.google.com/file/d/${fileId}/view,
-    download_url: https://drive.google.com/uc?export=download&id=${fileId},
+    view_url: `https://drive.google.com/file/d/${fileId}/view`,
+    download_url: `https://drive.google.com/uc?export=download&id=${fileId}`,
     thumbnail_url: '',
     duration: metadata.duration,
     created_date: new Date().toISOString(),
@@ -84,13 +84,13 @@ async function uploadToDriveUnified({ filePath, metadata, isFullClip = false }) 
 }
 
 async function cutClipFromDriveFile({ fileId, startTimeInSec, durationInSec, matchId, actionType, playerName }) {
-  const inputPath = /tmp/input_${fileId}.webm;
+  const inputPath = `/tmp/input_${fileId}.webm`;
   const clipId = uuidv4();
-  const outputPath = /tmp/clip_${clipId}.webm;
+  const outputPath = `/tmp/clip_${clipId}.webm`;
 
   await downloadFileFromDrive(fileId, inputPath);
 
-  const command = ffmpeg -ss ${startTimeInSec} -i ${inputPath} -t ${durationInSec} -c copy -y ${outputPath};
+  const command = `ffmpeg -ss ${startTimeInSec} -i ${inputPath} -t ${durationInSec} -c copy -y ${outputPath}`;
   console.log('🎬 FFmpeg:', command);
 
   await new Promise((resolve, reject) => {
@@ -108,7 +108,7 @@ async function cutClipFromDriveFile({ fileId, startTimeInSec, durationInSec, mat
       player_name: playerName,
       duration: durationInSec,
       created_date: new Date().toISOString(),
-      custom_name: clip_${matchId}_${clipId}.webm,
+      custom_name: `clip_${matchId}_${clipId}.webm`,
     },
     isFullClip: false
   });
