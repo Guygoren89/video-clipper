@@ -28,17 +28,23 @@ function resolveMatchId(origId, segStart) {
 }
 
 // ────────────────────────────────────────────────────────────────────────────
-
 const app    = express();
 const upload = multer({ dest: 'uploads/' });
 
-// ✅ הרשאות CORS מותאמות ל־Base44 כולל Editor
+// ✅ הרשאות CORS מותאמות ל־Base44 כולל Editor ולינקים חיצוניים
 app.use(cors({
-  origin: [
-    'https://app.base44.com',
-    'https://preview--2000-f1d18643.base44.app',
-    'https://editor.base44.com'
-  ]
+  origin: (origin, callback) => {
+    const allowedOrigins = [
+      'https://app.base44.com',
+      'https://preview--2000-f1d18643.base44.app',
+      'https://editor.base44.com'
+    ];
+    if (!origin || allowedOrigins.includes(origin)) {
+      callback(null, true);
+    } else {
+      callback(new Error('Not allowed by CORS'));
+    }
+  }
 }));
 
 app.use(express.json({ limit: '10mb' }));
