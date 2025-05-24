@@ -28,10 +28,11 @@ function resolveMatchId(origId, segStart) {
 }
 
 // ────────────────────────────────────────────────────────────────────────────
+
 const app    = express();
 const upload = multer({ dest: 'uploads/' });
 
-// ✅ הרשאות CORS תואמות לכל הסביבות (Editor, Preview, App)
+// ✅ הרשאות CORS מותאמות ל־Base44 כולל Editor
 app.use(cors({
   origin: [
     'https://app.base44.com',
