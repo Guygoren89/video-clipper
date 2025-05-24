@@ -37,6 +37,7 @@ app.use(cors({
     const allowedOrigins = [
       'https://app.base44.com',
       'https://preview--2000-f1d18643.base44.app',
+      'https://app--2000-f1d18643.base44.app',
       'https://editor.base44.com'
     ];
     if (!origin || allowedOrigins.includes(origin)) {
