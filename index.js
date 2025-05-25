@@ -126,7 +126,7 @@ app.post('/auto-generate-clips', async (req, res) => {
         await cutClipFromDriveFile({
           fileId           : seg.file_id,
           matchId,
-          startTimeInSec   : formatTime(startSec),
+          startTimeInSec   : Number(startSec), // ✅ שינוי כאן — לא להשתמש ב־formatTime
           durationInSec    : durSec,
           actionType       : action_type,
           playerName       : player_name || '',
@@ -160,7 +160,7 @@ app.post('/generate-clips', async (req, res) => {
     const clip = await cutClipFromDriveFile({
       fileId           : file_id,
       matchId          : match_id,
-      startTimeInSec   : formatTime(Number(start_time)),
+      startTimeInSec   : Number(start_time), // ✅ שינוי כאן — לא להשתמש ב־formatTime
       durationInSec    : Number(duration),
       actionType       : action_type,
       playerName       : player_name || '',
