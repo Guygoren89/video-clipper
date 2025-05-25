@@ -44,7 +44,9 @@ async function uploadToDriveUnified({ filePath, metadata, isFullClip = false }) 
       match_id: metadata.match_id,
       action_type: metadata.action_type,
       player_name: metadata.player_name || '',
-      segment_start_time_in_game: metadata.segment_start_time_in_game?.toString() || '',
+      team_color: metadata.team_color || '',
+      assist_player_name: metadata.assist_player_name || '',
+      segment_start_time_in_game: metadata.segment_start_time_in_game?.toString() || ''
     }
   };
 
@@ -79,11 +81,13 @@ async function uploadToDriveUnified({ filePath, metadata, isFullClip = false }) 
     created_date: new Date().toISOString(),
     match_id: metadata.match_id,
     action_type: metadata.action_type,
-    player_name: metadata.player_name || ''
+    player_name: metadata.player_name || '',
+    team_color: metadata.team_color || '',
+    assist_player_name: metadata.assist_player_name || ''
   };
 }
 
-async function cutClipFromDriveFile({ fileId, startTimeInSec, durationInSec, matchId, actionType, playerName }) {
+async function cutClipFromDriveFile({ fileId, startTimeInSec, durationInSec, matchId, actionType, playerName, teamColor, assistPlayerName }) {
   const inputPath = `/tmp/input_${fileId}.webm`;
   const clipId = uuidv4();
   const outputPath = `/tmp/clip_${clipId}.webm`;
@@ -106,6 +110,8 @@ async function cutClipFromDriveFile({ fileId, startTimeInSec, durationInSec, mat
       match_id: matchId,
       action_type: actionType,
       player_name: playerName,
+      team_color: teamColor,
+      assist_player_name: assistPlayerName,
       duration: durationInSec,
       created_date: new Date().toISOString(),
       custom_name: `clip_${matchId}_${clipId}.webm`,
