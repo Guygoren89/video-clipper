@@ -10,13 +10,12 @@ const {
   cutClipFromDriveFile
 } = require('./segmentsManager');
 
-// ────────────────────────────────────────────────────────────────────────────
 const SCOPES = ['https://www.googleapis.com/auth/drive'];
 const auth = new google.auth.GoogleAuth({ scopes: SCOPES });
 const drive = google.drive({ version: 'v3', auth });
+
 const SHORT_CLIPS_FOLDER_ID = '1Lb0MSD-CKIsy1XCqb4b4ROvvGidqtmzU';
 
-// ────────────────────────────────────────────────────────────────────────────
 const matchIdMap = Object.create(null);
 function resolveMatchId(origId, segStart) {
   const isFirstSegment = Number(segStart) === 0;
@@ -27,7 +26,6 @@ function resolveMatchId(origId, segStart) {
   return matchIdMap[origId] || origId;
 }
 
-// ────────────────────────────────────────────────────────────────────────────
 const app    = express();
 const upload = multer({ dest: 'uploads/' });
 
@@ -50,10 +48,8 @@ app.use(cors({
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
 
-// ──────────────────────────────────
 app.get('/health', (_, res) => res.send('OK'));
 
-// ──────────────────────────────────
 app.post('/upload-segment', upload.single('file'), async (req, res) => {
   try {
     const { match_id: origMatchId, start_time, end_time, segment_start_time_in_game } = req.body;
@@ -87,7 +83,6 @@ app.post('/upload-segment', upload.single('file'), async (req, res) => {
   }
 });
 
-// ──────────────────────────────────
 app.post('/auto-generate-clips', async (req, res) => {
   try {
     const { match_id: origMatchId, actions = [], segments = [] } = req.body;
@@ -102,7 +97,13 @@ app.post('/auto-generate-clips', async (req, res) => {
     res.json({ success: true, message: 'Clip generation started in background', match_id: matchId });
 
     for (const action of actions) {
-      const { timestamp_in_game, action_type, player_name, team_color, assist_player_name } = action;
+      const {
+        timestamp_in_game,
+        action_type,
+        player_name,
+        team_color = '',
+        assist_player_name = ''
+      } = action;
 
       const seg = segments.find(s => {
         const segStart = Number(s.segment_start_time_in_game);
@@ -123,14 +124,14 @@ app.post('/auto-generate-clips', async (req, res) => {
 
       try {
         await cutClipFromDriveFile({
-          fileId        : seg.file_id,
+          fileId           : seg.file_id,
           matchId,
-          startTimeInSec: formatTime(startSec),
-          durationInSec : durSec,
-          actionType    : action_type,
-          playerName    : player_name || '',
-          teamColor     : team_color || '',
-          assistPlayer  : assist_player_name || ''
+          startTimeInSec   : formatTime(startSec),
+          durationInSec    : durSec,
+          actionType       : action_type,
+          playerName       : player_name || '',
+          teamColor        : team_color || '',
+          assistPlayer     : assist_player_name || ''
         });
       } catch (err) {
         console.error(`[ERROR] Clip cut failed: ${err.message}`);
@@ -141,7 +142,35 @@ app.post('/auto-generate-clips', async (req, res) => {
   }
 });
 
-// ──────────────────────────────────
+app.post('/generate-clips', async (req, res) => {
+  try {
+    const { file_id, match_id, start_time, duration, action_type, player_name } = req.body;
+
+    console.log('✂️ Manual clip request:', {
+      file_id,
+      match_id,
+      start_time,
+      duration,
+      action_type,
+      player_name
+    });
+
+    const clip = await cutClipFromDriveFile({
+      fileId        : file_id,
+      matchId       : match_id,
+      startTimeInSec: formatTime(Number(start_time)),
+      durationInSec : Number(duration),
+      actionType    : action_type,
+      playerName    : player_name || ''
+    });
+
+    return res.json({ success: true, clip });
+  } catch (err) {
+    console.error('[MANUAL CLIP ERROR]', err);
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 app.get('/clips', async (req, res) => {
   try {
     const list = await drive.files.list({
@@ -151,18 +180,18 @@ app.get('/clips', async (req, res) => {
     });
 
     const clips = list.data.files.map(file => ({
-      external_id   : file.id,
-      name          : file.name,
-      view_url      : `https://drive.google.com/file/d/${file.id}/view`,
-      download_url  : `https://drive.google.com/uc?export=download&id=${file.id}`,
-      thumbnail_url : '',
-      duration      : '',
-      created_date  : file.createdTime,
-      match_id      : file.properties?.match_id || '',
-      action_type   : file.properties?.action_type || '',
-      player_name   : file.properties?.player_name || '',
-      team_color    : file.properties?.team_color || '',
-      assist_player_name: file.properties?.assist_player_name || ''
+      external_id         : file.id,
+      name                : file.name,
+      view_url            : `https://drive.google.com/file/d/${file.id}/view`,
+      download_url        : `https://drive.google.com/uc?export=download&id=${file.id}`,
+      thumbnail_url       : '',
+      duration            : '',
+      created_date        : file.createdTime,
+      match_id            : file.properties?.match_id || '',
+      action_type         : file.properties?.action_type || '',
+      player_name         : file.properties?.player_name || '',
+      team_color          : file.properties?.team_color || '',
+      assist_player_name  : file.properties?.assist_player_name || ''
     }));
 
     res.json(clips);
@@ -172,7 +201,6 @@ app.get('/clips', async (req, res) => {
   }
 });
 
-// ──────────────────────────────────
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`📡 Server listening on port ${PORT}`);
