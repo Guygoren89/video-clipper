@@ -12,7 +12,7 @@ async function autoGenerateClips(fileId, clipTimestamps, matchId = `auto_match_$
     assist_player_name = ''
   } of clipTimestamps) {
     try {
-      const needsPrevious = start_time_in_segment < 3; // רק אם הפעולה מוקדמת מ־3 שניות
+      const needsPrevious = start_time_in_segment < 3; // 🟡 רק אם הפעולה מוקדמת מ־3 שניות
       let previousFileId = null;
 
       if (needsPrevious && segments.length > 0) {
@@ -33,7 +33,7 @@ async function autoGenerateClips(fileId, clipTimestamps, matchId = `auto_match_$
         actionType     : action_type,
         playerName     : player_name,
         teamColor      : team_color,
-        assistPlayer   : assist_player_name
+        assistPlayerName: assist_player_name // ✅ תיקון מפתח שגוי: assistPlayer → assistPlayerName
       });
 
       results.push(result);
