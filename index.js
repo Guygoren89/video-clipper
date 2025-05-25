@@ -31,7 +31,6 @@ function resolveMatchId(origId, segStart) {
 const app    = express();
 const upload = multer({ dest: 'uploads/' });
 
-// ✅ הרשאות CORS מותאמות ל־Base44 כולל Editor ולינקים חיצוניים
 app.use(cors({
   origin: (origin, callback) => {
     const allowedOrigins = [
@@ -103,7 +102,7 @@ app.post('/auto-generate-clips', async (req, res) => {
     res.json({ success: true, message: 'Clip generation started in background', match_id: matchId });
 
     for (const action of actions) {
-      const { timestamp_in_game, action_type, player_name } = action;
+      const { timestamp_in_game, action_type, player_name, team_color, assist_player_name } = action;
 
       const seg = segments.find(s => {
         const segStart = Number(s.segment_start_time_in_game);
@@ -129,7 +128,9 @@ app.post('/auto-generate-clips', async (req, res) => {
           startTimeInSec: formatTime(startSec),
           durationInSec : durSec,
           actionType    : action_type,
-          playerName    : player_name || ''
+          playerName    : player_name || '',
+          teamColor     : team_color || '',
+          assistPlayer  : assist_player_name || ''
         });
       } catch (err) {
         console.error(`[ERROR] Clip cut failed: ${err.message}`);
@@ -137,36 +138,6 @@ app.post('/auto-generate-clips', async (req, res) => {
     }
   } catch (err) {
     console.error('[CLIP ERROR]', err);
-  }
-});
-
-// ──────────────────────────────────
-app.post('/generate-clips', async (req, res) => {
-  try {
-    const { file_id, match_id, start_time, duration, action_type, player_name } = req.body;
-
-    console.log('✂️ Manual clip request:', {
-      file_id,
-      match_id,
-      start_time,
-      duration,
-      action_type,
-      player_name
-    });
-
-    const clip = await cutClipFromDriveFile({
-      fileId        : file_id,
-      matchId       : match_id,
-      startTimeInSec: formatTime(Number(start_time)),
-      durationInSec : Number(duration),
-      actionType    : action_type,
-      playerName    : player_name || ''
-    });
-
-    return res.json({ success: true, clip });
-  } catch (err) {
-    console.error('[MANUAL CLIP ERROR]', err);
-    return res.status(500).json({ success: false, error: err.message });
   }
 });
 
@@ -189,7 +160,9 @@ app.get('/clips', async (req, res) => {
       created_date  : file.createdTime,
       match_id      : file.properties?.match_id || '',
       action_type   : file.properties?.action_type || '',
-      player_name   : file.properties?.player_name || ''
+      player_name   : file.properties?.player_name || '',
+      team_color    : file.properties?.team_color || '',
+      assist_player_name: file.properties?.assist_player_name || ''
     }));
 
     res.json(clips);
