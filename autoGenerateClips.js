@@ -1,47 +1,61 @@
 const { cutClipFromDriveFile } = require('./segmentsManager');
 
-async function autoGenerateClips(fileId, clipTimestamps, matchId = `auto_match_${Date.now()}`, segments = []) {
+async function autoGenerateClips(actions = [], matchId = `auto_match_${Date.now()}`, segments = []) {
   const results = [];
 
   for (const {
-    start_time_in_segment,
+    timestamp_in_game,
     duration = 8,
     action_type = 'auto_clip',
     player_name = '',
     team_color = '',
     assist_player_name = ''
-  } of clipTimestamps) {
+  } of actions) {
     try {
-      const needsPrevious = start_time_in_segment < 3; // 🟡 רק אם הפעולה מוקדמת מ־3 שניות
-      let previousFileId = null;
+      const seg = segments.find(s => {
+        const segStart = Number(s.segment_start_time_in_game);
+        const segEnd = segStart + Number(s.duration || 20);
+        return timestamp_in_game >= segStart && timestamp_in_game < segEnd;
+      });
 
-      if (needsPrevious && segments.length > 0) {
-        const currentSegment = segments.find(s => s.file_id === fileId);
-        const currentIndex = segments.indexOf(currentSegment);
-        const previousSegment = segments[currentIndex - 1];
-        if (previousSegment) {
-          previousFileId = previousSegment.file_id;
-        }
+      if (!seg) {
+        results.push({
+          success: false,
+          error: 'No matching segment found',
+          timestamp_in_game
+        });
+        continue;
+      }
+
+      const relative = timestamp_in_game - Number(seg.segment_start_time_in_game);
+      const needsPrevious = relative < 3;
+
+      let previousFileId = null;
+      const currentIndex = segments.indexOf(seg);
+      const previousSegment = segments[currentIndex - 1];
+
+      if (needsPrevious && previousSegment) {
+        previousFileId = previousSegment.file_id;
       }
 
       const result = await cutClipFromDriveFile({
-        fileId,
+        fileId: seg.file_id,
         previousFileId,
-        startTimeInSec : start_time_in_segment,
-        durationInSec  : duration,
+        startTimeInSec: relative,
+        durationInSec: duration,
         matchId,
-        actionType     : action_type,
-        playerName     : player_name,
-        teamColor      : team_color,
-        assistPlayerName: assist_player_name // ✅ תיקון מפתח שגוי: assistPlayer → assistPlayerName
+        actionType: action_type,
+        playerName: player_name,
+        teamColor: team_color,
+        assistPlayerName: assist_player_name
       });
 
       results.push(result);
     } catch (err) {
       results.push({
         success: false,
-        error  : err.message,
-        start_time_in_segment
+        error: err.message,
+        timestamp_in_game
       });
     }
   }
