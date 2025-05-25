@@ -1,8 +1,8 @@
-const fs   = require('fs');
+const fs = require('fs');
 const path = require('path');
 const { v4: uuidv4 } = require('uuid');
-const { exec }       = require('child_process');
-const { google }     = require('googleapis');
+const { exec } = require('child_process');
+const { google } = require('googleapis');
 
 const SCOPES = ['https://www.googleapis.com/auth/drive'];
 const auth   = new google.auth.GoogleAuth({ scopes: SCOPES });
@@ -11,54 +11,43 @@ const drive  = google.drive({ version: 'v3', auth });
 const FULL_CLIPS_FOLDER_ID  = '1vu6elArxj6YKLZePXjoqp_UFrDiI5ZOC';
 const SHORT_CLIPS_FOLDER_ID = '1Lb0MSD-CKIsy1XCqb4b4ROvvGidqtmzU';
 
-function pad(n)        { return n.toString().padStart(2, '0'); }
-function formatTime(s) { return `${pad(Math.floor(s/3600))}:${pad(Math.floor((s%3600)/60))}:${pad(Math.floor(s%60))}`; }
+/* ---------- helpers ---------- */
+function pad(n){return n.toString().padStart(2,'0');}
+function formatTime(s){return`${pad(Math.floor(s/3600))}:${pad(Math.floor((s%3600)/60))}:${pad(Math.floor(s%60))}`;}
 
-async function downloadFileFromDrive(fileId, dest) {
-  const dst = fs.createWriteStream(dest);
-  const res = await drive.files.get({ fileId, alt: 'media' }, { responseType: 'stream' });
-  await new Promise((ok, err) => {
-    res.data.pipe(dst);
-    dst.on('finish', ok);
-    dst.on('error',  err);
-  });
+async function downloadFileFromDrive(id,dst){
+  const out=fs.createWriteStream(dst);
+  const res=await drive.files.get({fileId:id,alt:'media'},{responseType:'stream'});
+  await new Promise((ok,err)=>{res.data.pipe(out);out.on('finish',ok);out.on('error',err);});
 }
 
-async function uploadToDriveUnified({ filePath, metadata, isFullClip = false }) {
-  const folderId = isFullClip ? FULL_CLIPS_FOLDER_ID : SHORT_CLIPS_FOLDER_ID;
-  const meta = {
-    name: metadata.custom_name || path.basename(filePath),
-    parents: [folderId],
-    properties: {
-      match_id                : metadata.match_id,
-      action_type             : metadata.action_type,
-      player_name             : metadata.player_name || '',
-      team_color              : metadata.team_color || '',
-      assist_player_name      : metadata.assist_player_name || ''
+async function uploadToDriveUnified({filePath,metadata,isFullClip=false}){
+  const folderId=isFullClip?FULL_CLIPS_FOLDER_ID:SHORT_CLIPS_FOLDER_ID;
+  const meta={
+    name:metadata.custom_name||path.basename(filePath),
+    parents:[folderId],
+    properties:{
+      match_id           :metadata.match_id,
+      action_type        :metadata.action_type,
+      player_name        :metadata.player_name||'',
+      team_color         :metadata.team_color||'',
+      assist_player_name :metadata.assist_player_name||''
     }
   };
-
-  const { data } = await drive.files.create({
-    requestBody: meta,
-    media      : { mimeType: 'video/webm', body: fs.createReadStream(filePath) },
-    fields     : 'id'
+  const {data}=await drive.files.create({
+    requestBody:meta,
+    media:{mimeType:'video/webm',body:fs.createReadStream(filePath)},
+    fields:'id'
   });
-
-  await drive.permissions.create({ fileId: data.id, requestBody: { role: 'reader', type: 'anyone' } });
-
-  return {
-    external_id: data.id,
-    name       : meta.name,
-    view_url   : `https://drive.google.com/file/d/${data.id}/view`,
-    download_url: `https://drive.google.com/uc?export=download&id=${data.id}`,
-    created_date: new Date().toISOString(),
-    ...metadata
-  };
+  await drive.permissions.create({fileId:data.id,requestBody:{role:'reader',type:'anyone'}});
+  return {...metadata,external_id:data.id,view_url:`https://drive.google.com/file/d/${data.id}/view`,
+          download_url:`https://drive.google.com/uc?export=download&id=${data.id}`,name:meta.name};
 }
 
+/* ---------- MAIN ---------- */
 async function cutClipFromDriveFile({
   fileId,
-  previousFileId = null,
+  previousFileId=null,
   startTimeInSec,
   durationInSec,
   matchId,
@@ -66,64 +55,56 @@ async function cutClipFromDriveFile({
   playerName,
   teamColor,
   assistPlayerName
-}) {
+}){
   const clipId = uuidv4();
   const out    = `/tmp/clip_${clipId}.webm`;
   let   inFile = '';
 
-  /* ========== merge (optional) ========== */
-  if (previousFileId) {
-    const in1 = `/tmp/in1_${clipId}.webm`;
-    const in2 = `/tmp/in2_${clipId}.webm`;
-    const merged = `/tmp/merged_${clipId}.webm`;
+  /* ---- merge (demuxer-concat) ---- */
+  if(previousFileId){
+    const in1   = `/tmp/in1_${clipId}.webm`;
+    const in2   = `/tmp/in2_${clipId}.webm`;
+    const list  = `/tmp/list_${clipId}.txt`;
+    const merge = `/tmp/merged_${clipId}.webm`;
 
-    await downloadFileFromDrive(previousFileId, in1);
-    await downloadFileFromDrive(fileId,         in2);
+    await downloadFileFromDrive(previousFileId,in1);
+    await downloadFileFromDrive(fileId,in2);
+    fs.writeFileSync(list,`file '${in1}'\nfile '${in2}'\n`);
 
-    const mergeCmd = `ffmpeg -i ${in1} -i ${in2} -filter_complex "[0:v:0][1:v:0]concat=n=2:v=1[outv]" -map "[outv]" -y ${merged}`;
-    console.log('🎬 FFmpeg Merge:', mergeCmd);
-    await new Promise((ok, err) => exec(mergeCmd, e => e ? err(e) : ok()));
+    const mergeCmd=`ffmpeg -f concat -safe 0 -i ${list} -c copy -y ${merge}`;
+    console.log('🎬 FFmpeg Merge:',mergeCmd);
+    await new Promise((ok,err)=>exec(mergeCmd,(e,_,se)=>e?(console.error('❌ Merge stderr:',se),err(e)):ok()));
 
-    [in1,in2].forEach(p => fs.existsSync(p)&&fs.unlinkSync(p));
-    inFile = merged;
-  } else {
-    inFile = `/tmp/input_${clipId}.webm`;
-    await downloadFileFromDrive(fileId, inFile);
+    [in1,in2,list].forEach(p=>fs.existsSync(p)&&fs.unlinkSync(p));
+    inFile=merge;
+  }else{
+    inFile=`/tmp/input_${clipId}.webm`;
+    await downloadFileFromDrive(fileId,inFile);
   }
 
-  if (typeof startTimeInSec === 'string') {
-    const [h,m,s] = startTimeInSec.split(':').map(Number);
-    startTimeInSec = h*3600 + m*60 + s;
+  if(typeof startTimeInSec==='string'){
+    const [h,m,s]=startTimeInSec.split(':').map(Number);
+    startTimeInSec=h*3600+m*60+s;
   }
 
-  /* ========== cut ========== */
-  const cutCmd = `ffmpeg -ss ${startTimeInSec} -i ${inFile} -t ${durationInSec} -c copy -y ${out}`;
-  console.log('✂️ FFmpeg Cut:', cutCmd);
+  /* ---- cut ---- */
+  const cutCmd=`ffmpeg -ss ${startTimeInSec} -i ${inFile} -t ${durationInSec} -c copy -y ${out}`;
+  console.log('✂️ FFmpeg Cut:',cutCmd);
+  await new Promise((ok,err)=>exec(cutCmd,(e,_,se)=>e?(console.error('❌ Cut stderr:',se),err(e)):ok()));
 
-  await new Promise((ok, err) => {
-    exec(cutCmd, (e, _, stderr) => {
-      if (e) {
-        console.error('❌ FFmpeg Cut failed:', e.message);
-        console.error('stderr:', stderr);
-        return err(e);
-      }
-      ok();
-    });
-  });
-
-  const uploaded = await uploadToDriveUnified({
-    filePath: out,
-    metadata: {
-      match_id          : matchId,
-      action_type       : actionType,
-      player_name       : playerName,
-      team_color        : teamColor,
-      assist_player_name: assistPlayerName
+  const clip=await uploadToDriveUnified({
+    filePath:out,
+    metadata:{
+      match_id:matchId,
+      action_type:actionType,
+      player_name:playerName,
+      team_color:teamColor,
+      assist_player_name:assistPlayerName
     }
   });
 
-  [inFile,out].forEach(p => fs.existsSync(p)&&fs.unlinkSync(p));
-  return uploaded;
+  [inFile,out].forEach(p=>fs.existsSync(p)&&fs.unlinkSync(p));
+  return clip;
 }
 
-module.exports = { formatTime, cutClipFromDriveFile, uploadToDrive: uploadToDriveUnified };
+module.exports={formatTime,cutClipFromDriveFile,uploadToDrive:uploadToDriveUnified};
