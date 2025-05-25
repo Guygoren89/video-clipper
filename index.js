@@ -131,7 +131,7 @@ app.post('/auto-generate-clips', async (req, res) => {
           actionType       : action_type,
           playerName       : player_name || '',
           teamColor        : team_color || '',
-          assistPlayer     : assist_player_name || ''
+          assistPlayerName : assist_player_name || ''
         });
       } catch (err) {
         console.error(`[ERROR] Clip cut failed: ${err.message}`);
@@ -144,7 +144,7 @@ app.post('/auto-generate-clips', async (req, res) => {
 
 app.post('/generate-clips', async (req, res) => {
   try {
-    const { file_id, match_id, start_time, duration, action_type, player_name } = req.body;
+    const { file_id, match_id, start_time, duration, action_type, player_name, team_color, assist_player_name } = req.body;
 
     console.log('✂️ Manual clip request:', {
       file_id,
@@ -152,16 +152,20 @@ app.post('/generate-clips', async (req, res) => {
       start_time,
       duration,
       action_type,
-      player_name
+      player_name,
+      team_color,
+      assist_player_name
     });
 
     const clip = await cutClipFromDriveFile({
-      fileId        : file_id,
-      matchId       : match_id,
-      startTimeInSec: formatTime(Number(start_time)),
-      durationInSec : Number(duration),
-      actionType    : action_type,
-      playerName    : player_name || ''
+      fileId           : file_id,
+      matchId          : match_id,
+      startTimeInSec   : formatTime(Number(start_time)),
+      durationInSec    : Number(duration),
+      actionType       : action_type,
+      playerName       : player_name || '',
+      teamColor        : team_color || '',
+      assistPlayerName : assist_player_name || ''
     });
 
     return res.json({ success: true, clip });
