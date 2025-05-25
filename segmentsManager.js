@@ -27,11 +27,12 @@ async function uploadToDriveUnified({filePath,metadata,isFullClip=false}){
     name:metadata.custom_name||path.basename(filePath),
     parents:[folderId],
     properties:{
-      match_id           :metadata.match_id,
-      action_type        :metadata.action_type,
-      player_name        :metadata.player_name||'',
-      team_color         :metadata.team_color||'',
-      assist_player_name :metadata.assist_player_name||''
+      match_id:metadata.match_id,
+      action_type:metadata.action_type,
+      player_name:metadata.player_name||'',
+      team_color:metadata.team_color||'',
+      assist_player_name:metadata.assist_player_name||'',
+      segment_start_time_in_game:metadata.segment_start_time_in_game||''
     }
   };
   const {data}=await drive.files.create({
@@ -40,8 +41,10 @@ async function uploadToDriveUnified({filePath,metadata,isFullClip=false}){
     fields:'id'
   });
   await drive.permissions.create({fileId:data.id,requestBody:{role:'reader',type:'anyone'}});
-  return {...metadata,external_id:data.id,view_url:`https://drive.google.com/file/d/${data.id}/view`,
-          download_url:`https://drive.google.com/uc?export=download&id=${data.id}`,name:meta.name};
+  return {...metadata,external_id:data.id,name:meta.name,
+          view_url:`https://drive.google.com/file/d/${data.id}/view`,
+          download_url:`https://drive.google.com/uc?export=download&id=${data.id}`,
+          created_date:new Date().toISOString()};
 }
 
 /* ---------- MAIN ---------- */
@@ -54,29 +57,29 @@ async function cutClipFromDriveFile({
   actionType,
   playerName,
   teamColor,
-  assistPlayerName
+  assistPlayerName,
+  segmentStartTimeInGame=''          // ⬅️ חדש
 }){
-  const clipId = uuidv4();
-  const out    = `/tmp/clip_${clipId}.webm`;
-  let   inFile = '';
+  const clipId=uuidv4();
+  const out=`/tmp/clip_${clipId}.webm`;
+  let inFile='';
 
   /* ---- merge (demuxer-concat) ---- */
   if(previousFileId){
-    const in1   = `/tmp/in1_${clipId}.webm`;
-    const in2   = `/tmp/in2_${clipId}.webm`;
-    const list  = `/tmp/list_${clipId}.txt`;
-    const merge = `/tmp/merged_${clipId}.webm`;
+    const in1=`/tmp/in1_${clipId}.webm`;
+    const in2=`/tmp/in2_${clipId}.webm`;
+    const list=`/tmp/list_${clipId}.txt`;
+    const merged=`/tmp/merged_${clipId}.webm`;
 
     await downloadFileFromDrive(previousFileId,in1);
     await downloadFileFromDrive(fileId,in2);
     fs.writeFileSync(list,`file '${in1}'\nfile '${in2}'\n`);
 
-    const mergeCmd=`ffmpeg -f concat -safe 0 -i ${list} -c copy -y ${merge}`;
+    const mergeCmd=`ffmpeg -f concat -safe 0 -i ${list} -c copy -y ${merged}`;
     console.log('🎬 FFmpeg Merge:',mergeCmd);
     await new Promise((ok,err)=>exec(mergeCmd,(e,_,se)=>e?(console.error('❌ Merge stderr:',se),err(e)):ok()));
-
     [in1,in2,list].forEach(p=>fs.existsSync(p)&&fs.unlinkSync(p));
-    inFile=merge;
+    inFile=merged;
   }else{
     inFile=`/tmp/input_${clipId}.webm`;
     await downloadFileFromDrive(fileId,inFile);
@@ -99,7 +102,8 @@ async function cutClipFromDriveFile({
       action_type:actionType,
       player_name:playerName,
       team_color:teamColor,
-      assist_player_name:assistPlayerName
+      assist_player_name:assistPlayerName,
+      segment_start_time_in_game:segmentStartTimeInGame
     }
   });
 
