@@ -1,6 +1,6 @@
 const { cutClipFromDriveFile } = require('./segmentsManager');
 
-async function autoGenerateClips(fileId, clipTimestamps, matchId = `auto_match_${Date.now()}`) {
+async function autoGenerateClips(fileId, clipTimestamps, matchId = `auto_match_${Date.now()}`, segments = []) {
   const results = [];
 
   for (const {
@@ -12,8 +12,21 @@ async function autoGenerateClips(fileId, clipTimestamps, matchId = `auto_match_$
     assist_player_name = ''
   } of clipTimestamps) {
     try {
+      const needsPrevious = start_time_in_segment < 3; // רק אם הפעולה מוקדמת מ־3 שניות
+      let previousFileId = null;
+
+      if (needsPrevious && segments.length > 0) {
+        const currentSegment = segments.find(s => s.file_id === fileId);
+        const currentIndex = segments.indexOf(currentSegment);
+        const previousSegment = segments[currentIndex - 1];
+        if (previousSegment) {
+          previousFileId = previousSegment.file_id;
+        }
+      }
+
       const result = await cutClipFromDriveFile({
         fileId,
+        previousFileId,
         startTimeInSec : start_time_in_segment,
         durationInSec  : duration,
         matchId,
@@ -22,6 +35,7 @@ async function autoGenerateClips(fileId, clipTimestamps, matchId = `auto_match_$
         teamColor      : team_color,
         assistPlayer   : assist_player_name
       });
+
       results.push(result);
     } catch (err) {
       results.push({
