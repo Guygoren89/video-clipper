@@ -45,18 +45,26 @@ app.post('/auto-generate-clips',async(req,res)=>{
       return a.timestamp_in_game>=s0&&a.timestamp_in_game<s0+Number(s.duration||20);
     });
     if(!seg)continue;
+
     const rel=a.timestamp_in_game-Number(seg.segment_start_time_in_game);
     let start=Math.max(0,rel-8),prev=null;
     if(rel<3){
       const idx=segments.indexOf(seg);
       if(idx>0){prev=segments[idx-1].file_id;start=Number(seg.duration||20)+rel-8;}
     }
+
     try{
       await cutClipFromDriveFile({
-        fileId:seg.file_id,previousFileId:prev,
-        startTimeInSec:start,durationInSec:8,matchId,
-        actionType:a.action_type,playerName:a.player_name,
-        teamColor:a.team_color,assistPlayerName:a.assist_player_name
+        fileId:seg.file_id,
+        previousFileId:prev,
+        startTimeInSec:start,
+        durationInSec:8,
+        matchId,
+        actionType:a.action_type,
+        playerName:a.player_name,
+        teamColor:a.team_color,
+        assistPlayerName:a.assist_player_name,
+        segmentStartTimeInGame:seg.segment_start_time_in_game  // ⬅️ חדש
       });
     }catch(e){console.error('[auto-cut]',e.message);}
   }
@@ -64,8 +72,11 @@ app.post('/auto-generate-clips',async(req,res)=>{
 
 /* clips feed */
 app.get('/clips',async(_,res)=>{
-  const list=await drive.files.list({q:`'${SHORT_CLIPS_FOLDER_ID}' in parents and trashed=false`,
-    fields:'files(id,name,createdTime,properties)',orderBy:'createdTime desc'});
+  const list=await drive.files.list({
+    q:`'${SHORT_CLIPS_FOLDER_ID}' in parents and trashed=false`,
+    fields:'files(id,name,createdTime,properties)',
+    orderBy:'createdTime desc'
+  });
   res.json(list.data.files.map(f=>({...f.properties,external_id:f.id,name:f.name,
     view_url:`https://drive.google.com/file/d/${f.id}/view`,
     download_url:`https://drive.google.com/uc?export=download&id=${f.id}`,
