@@ -69,9 +69,9 @@ app.post('/auto-generate-clips', async (req, res) => {
   console.log('✂️  Auto clip request:', {
     match_id, actions: actions.length, segments: segments.length
   });
-  res.json({ success: true });                                           // תשובה מידית
+  res.json({ success: true });                             // תשובה מידית
 
-  /* סידור המקטעים לפי זמן-התחלה – עוזר לחישוב המקטע הקודם */
+  /* סידור המקטעים לפי זמן-התחלה */
   const segsByTime = [...segments].sort(
     (a, b) => Number(a.segment_start_time_in_game) - Number(b.segment_start_time_in_game)
   );
@@ -94,10 +94,11 @@ app.post('/auto-generate-clips', async (req, res) => {
       let   startSec = Math.max(0, rel - 8);
       let   prevSeg  = null;
 
-      if (rel < 3) {                                   // <-- קרוב לתחילת המקטע
+      /* ← שינוי יחיד: <= 3 שניות כולל */
+      if (rel <= 3) {                         // **** פה השינוי ****
         prevSeg = segsByTime
           .filter(s => Number(s.segment_start_time_in_game) < Number(seg.segment_start_time_in_game))
-          .pop();                                      // האחרון לפניו
+          .pop();
         if (prevSeg) {
           startSec = Number(prevSeg.duration || 20) + rel - 8;
           if (startSec < 0) startSec = 0;
@@ -108,7 +109,7 @@ app.post('/auto-generate-clips', async (req, res) => {
       await cutClipFromDriveFile({
         fileId           : seg.file_id,
         previousFileId   : prevSeg ? prevSeg.file_id : null,
-        startTimeInSec   : startSec,                   // מוסר מספר, לא מחרוזת
+        startTimeInSec   : startSec,          // מספר
         durationInSec    : 8,
         matchId          : match_id,
         actionType       : action.action_type,
@@ -123,7 +124,7 @@ app.post('/auto-generate-clips', async (req, res) => {
   }
 });
 
-/* ───────────── clips feed  (/clips?limit=..&before=..) ───────────── */
+/* ───────────── clips feed  (/clips?limit&before) ───────────── */
 app.get('/clips', async (req, res) => {
   try {
     const limit  = Math.min(Number(req.query.limit) || 100, 200);
