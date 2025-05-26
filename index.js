@@ -11,25 +11,23 @@ const {
   cutClipFromDriveFile
 } = require('./segmentsManager');
 
-/* ─────────────────────────── Google Drive  ─────────────────────────── */
+/* ─────────────────────────── Google Drive ─────────────────────────── */
 const SCOPES = ['https://www.googleapis.com/auth/drive'];
 const auth   = new google.auth.GoogleAuth({ scopes: SCOPES });
 const drive  = google.drive({ version: 'v3', auth });
 
 const SHORT_CLIPS_FOLDER_ID = '1Lb0MSD-CKIsy1XCqb4b4ROvvGidqtmzU';
 
-/* ---------- helper: "00:00:20"  →  20 (sec) ---------- */
+/* helper: "00:00:20" → 20 (sec) */
 function toSeconds(val) {
   if (!val) return 0;
   if (typeof val === 'number') return val;
-  if (val.includes(':')) {
-    return val.split(':').map(Number).reduce((t, n) => t * 60 + n, 0);
-  }
+  if (val.includes(':')) return val.split(':').map(Number).reduce((t,n)=>t*60+n,0);
   const n = Number(val);
   return Number.isNaN(n) ? 0 : n;
 }
 
-/* ─────────────────────────────  app  ─────────────────────────────── */
+/* ─────────────────────────────  app ─────────────────────────────── */
 const app    = express();
 const PORT   = process.env.PORT || 3000;
 const upload = multer({ dest: 'uploads/' });
@@ -38,16 +36,16 @@ app.use(cors());
 app.use(express.json());
 app.get('/health', (_, res) => res.send('OK'));
 
-/* ───────────── upload-segment (20 s) ───────────── */
+/* ───────── upload-segment (20 s) ───────── */
 app.post('/upload-segment', upload.single('file'), async (req, res) => {
   try {
     const { file } = req;
     const { match_id, segment_start_time_in_game = 0, duration = '00:00:20' } = req.body;
 
-    console.log('📥  Upload received:', {
+    console.log('📥 Upload received:', {
       localPath : file.path,
       name      : file.originalname,
-      sizeMB    : (file.size / 1024 / 1024).toFixed(2),
+      sizeMB    : (file.size/1024/1024).toFixed(2),
       match_id,
       segment_start_time_in_game
     });
@@ -63,7 +61,7 @@ app.post('/upload-segment', upload.single('file'), async (req, res) => {
       isFullClip : true
     });
 
-    console.log(`✅  Segment uploaded (id=${uploaded.external_id})`);
+    console.log(`✅ Segment uploaded (id=${uploaded.external_id})`);
     fs.unlink(file.path, () => {});
     res.json({ success: true, clip: uploaded });
   } catch (err) {
@@ -72,49 +70,50 @@ app.post('/upload-segment', upload.single('file'), async (req, res) => {
   }
 });
 
-/* ───────────── auto-generate-clips (SHORT) ───────────── */
+/* ───────── auto-generate-clips (SHORT) ───────── */
 app.post('/auto-generate-clips', async (req, res) => {
   const { match_id, actions = [], segments = [] } = req.body;
 
-  console.log('✂️  Auto clip request:', {
+  console.log('✂️ Auto clip request:', {
     match_id, actions: actions.length, segments: segments.length
   });
-  res.json({ success: true });                             // תשובה מידית
+  res.json({ success: true });                           // reply immediately
 
-  /* סידור המקטעים לפי זמן-התחלה */
+  /* sort by start-time */
   const segsByTime = [...segments].sort(
-    (a, b) => Number(a.segment_start_time_in_game) - Number(b.segment_start_time_in_game)
+    (a,b) => Number(a.segment_start_time_in_game) - Number(b.segment_start_time_in_game)
   );
 
   for (const action of actions) {
     try {
-      /* המקטע שבו מתרחשת הפעולה */
+      /* locate current segment */
       const seg = segsByTime.find(s => {
         const start = Number(s.segment_start_time_in_game);
+        const dur   = toSeconds(s.duration) || 20;           // ← תיקון כאן
         return action.timestamp_in_game >= start &&
-               action.timestamp_in_game <  start + toSeconds(s.duration) || 20;
+               action.timestamp_in_game <  start + dur;
       });
       if (!seg) {
-        console.warn(`⚠️  No segment for ${action.timestamp_in_game}s`);
+        console.warn(`⚠️ No segment for ${action.timestamp_in_game}s`);
         continue;
       }
 
-      /* האם צריך מיזוג עם המקטע הקודם? */
+      /* relative position & possible merge */
       const rel = action.timestamp_in_game - Number(seg.segment_start_time_in_game);
       let   startSec = Math.max(0, rel - 8);
       let   prevSeg  = null;
 
-      if (rel <= 3) {                           // ≤-3 s כולל
+      if (rel <= 3) {
         prevSeg = segsByTime
           .filter(s => Number(s.segment_start_time_in_game) < Number(seg.segment_start_time_in_game))
           .pop();
         if (prevSeg) {
-          startSec = toSeconds(prevSeg.duration) + rel - 8;
+          startSec = (toSeconds(prevSeg.duration) || 20) + rel - 8;
           if (startSec < 0) startSec = 0;
         }
       }
 
-      console.log(`✂️  Cutting ${seg.file_id}${prevSeg ? ' +prev' : ''} @${startSec}s`);
+      console.log(`✂️ Cutting ${seg.file_id}${prevSeg?' +prev':''} @${startSec}s`);
       await cutClipFromDriveFile({
         fileId                 : seg.file_id,
         previousFileId         : prevSeg ? prevSeg.file_id : null,
@@ -133,10 +132,10 @@ app.post('/auto-generate-clips', async (req, res) => {
   }
 });
 
-/* ───────────── clips feed  (/clips?limit&before) ───────────── */
-app.get('/clips', async (req, res) => {
+/* ───────── clips feed (/clips?limit&before) ───────── */
+app.get('/clips', async (req,res) => {
   try {
-    const limit  = Math.min(Number(req.query.limit) || 100, 200);
+    const limit  = Math.min(Number(req.query.limit)||100, 200);
     const before = req.query.before ? new Date(req.query.before).toISOString() : null;
 
     const qParts = [
@@ -173,5 +172,5 @@ app.get('/clips', async (req, res) => {
   }
 });
 
-/* ───────────── start server ───────────── */
-app.listen(PORT, () => console.log(`📡  Server listening on port ${PORT}`));
+/* ───────── start server ───────── */
+app.listen(PORT, () => console.log(`📡 Server listening on port ${PORT}`));
