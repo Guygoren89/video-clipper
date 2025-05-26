@@ -8,8 +8,7 @@ const { google } = require('googleapis');
 
 const {
   uploadToDrive,
-  cutClipFromDriveFile,
-  formatTime
+  cutClipFromDriveFile
 } = require('./segmentsManager');
 
 /* ─────────────────────────── Google Drive  ─────────────────────────── */
@@ -18,6 +17,17 @@ const auth   = new google.auth.GoogleAuth({ scopes: SCOPES });
 const drive  = google.drive({ version: 'v3', auth });
 
 const SHORT_CLIPS_FOLDER_ID = '1Lb0MSD-CKIsy1XCqb4b4ROvvGidqtmzU';
+
+/* ---------- helper: "00:00:20"  →  20 (sec) ---------- */
+function toSeconds(val) {
+  if (!val) return 0;
+  if (typeof val === 'number') return val;
+  if (val.includes(':')) {
+    return val.split(':').map(Number).reduce((t, n) => t * 60 + n, 0);
+  }
+  const n = Number(val);
+  return Number.isNaN(n) ? 0 : n;
+}
 
 /* ─────────────────────────────  app  ─────────────────────────────── */
 const app    = express();
@@ -82,7 +92,7 @@ app.post('/auto-generate-clips', async (req, res) => {
       const seg = segsByTime.find(s => {
         const start = Number(s.segment_start_time_in_game);
         return action.timestamp_in_game >= start &&
-               action.timestamp_in_game <  start + Number(s.duration || 20);
+               action.timestamp_in_game <  start + toSeconds(s.duration) || 20;
       });
       if (!seg) {
         console.warn(`⚠️  No segment for ${action.timestamp_in_game}s`);
@@ -94,28 +104,27 @@ app.post('/auto-generate-clips', async (req, res) => {
       let   startSec = Math.max(0, rel - 8);
       let   prevSeg  = null;
 
-      /* ← שינוי יחיד: <= 3 שניות כולל */
-      if (rel <= 3) {                         // **** פה השינוי ****
+      if (rel <= 3) {                           // ≤-3 s כולל
         prevSeg = segsByTime
           .filter(s => Number(s.segment_start_time_in_game) < Number(seg.segment_start_time_in_game))
           .pop();
         if (prevSeg) {
-          startSec = Number(prevSeg.duration || 20) + rel - 8;
+          startSec = toSeconds(prevSeg.duration) + rel - 8;
           if (startSec < 0) startSec = 0;
         }
       }
 
       console.log(`✂️  Cutting ${seg.file_id}${prevSeg ? ' +prev' : ''} @${startSec}s`);
       await cutClipFromDriveFile({
-        fileId           : seg.file_id,
-        previousFileId   : prevSeg ? prevSeg.file_id : null,
-        startTimeInSec   : startSec,          // מספר
-        durationInSec    : 8,
-        matchId          : match_id,
-        actionType       : action.action_type,
-        playerName       : action.player_name,
-        teamColor        : action.team_color,
-        assistPlayerName : action.assist_player_name,
+        fileId                 : seg.file_id,
+        previousFileId         : prevSeg ? prevSeg.file_id : null,
+        startTimeInSec         : startSec,
+        durationInSec          : 8,
+        matchId                : match_id,
+        actionType             : action.action_type,
+        playerName             : action.player_name,
+        teamColor              : action.team_color,
+        assistPlayerName       : action.assist_player_name,
         segmentStartTimeInGame : seg.segment_start_time_in_game
       });
     } catch (err) {
