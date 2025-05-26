@@ -11,7 +11,7 @@ const toSeconds = v =>
  * יוצר קליפים קצרים אוטומטית לפי רשימת פעולות.
  * – אם הפעולה מתרחשת עד 3 s מתחילת הסגמנט → מצרפים את הסגמנט הקודם למיזוג.
  */
-async function autoGenerateClips (
+async function autoGenerateClips(
   actions  = [],
   matchId  = `auto_match_${Date.now()}`,
   segments = []
@@ -29,12 +29,13 @@ async function autoGenerateClips (
     } = action;
 
     try {
+      /* locate segment */
       const seg = segments.find(s => {
         const start = Number(s.segment_start_time_in_game);
+        const dur   = toSeconds(s.duration) || 20;            // ← תיקון כאן
         return timestamp_in_game >= start &&
-               timestamp_in_game <  start + toSeconds(s.duration) || 20;
+               timestamp_in_game <  start + dur;
       });
-
       if (!seg) {
         results.push({ success:false, error:'No segment', timestamp_in_game });
         continue;
@@ -49,7 +50,7 @@ async function autoGenerateClips (
         if (idx > 0) {
           const prev = segments[idx - 1];
           previousFileId = prev.file_id;
-          startSec = toSeconds(prev.duration) + relative - 8;
+          startSec = (toSeconds(prev.duration) || 20) + relative - 8;
           if (startSec < 0) startSec = 0;
         }
       }
