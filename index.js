@@ -1,46 +1,57 @@
 /**
  * MAIN SERVER – Render
  * --------------------
- * ▸ אינו משנה לוגיקה קיימת של חיתוך/מיזוג.
- * ▸ מוסיף לוגים ברורים כדי שתראה מה קורה בכל שלב.
- * ▸ שומר על חתימת הפונקציות ב-segmentsManager.js (uploadToDrive, cutClipFromDriveFile).
+ * ▸ מחזיר את כל הלוגיקה המקורית + לוגים ברורים
+ * ▸ יוצר matchId ייחודי בעזרת resolveMatchId (כמו ב-v-OK)
+ * ▸ כולל /clips שעובר ל-Drive (כמו קודם)
  */
-
 const express  = require('express');
 const multer   = require('multer');
 const cors     = require('cors');
 const fs       = require('fs');
+const { google } = require('googleapis');
 const { v4: uuidv4 } = require('uuid');
 
 const {
-  uploadToDrive,          // export name in segmentsManager.js
-  cutClipFromDriveFile,   // "
+  uploadToDrive,
+  cutClipFromDriveFile,
 } = require('./segmentsManager');
 
-const app   = express();
-const PORT  = process.env.PORT || 3000;
+/* ─────────  Google Drive helper  ───────── */
+const auth  = new google.auth.GoogleAuth({ scopes: ['https://www.googleapis.com/auth/drive'] });
+const drive = google.drive({ version: 'v3', auth });
+const SHORT_CLIPS_FOLDER_ID = '1Lb0MSD-CKIsy1XCqb4b4ROvvGidqtmzU';
+
+/* ─────────  match-id helper  ───────── */
+const matchIdMap = Object.create(null);
+function resolveMatchId(origId, segStart) {
+  if (!matchIdMap[origId] && Number(segStart) === 0) {
+    matchIdMap[origId] = `${origId}_${Date.now()}`;
+    console.log(`🆕  New matchId → ${matchIdMap[origId]}`);
+  }
+  return matchIdMap[origId] || origId;
+}
+
+/* ─────────  Express setup  ───────── */
+const app    = express();
+const PORT   = process.env.PORT || 3000;
 const upload = multer({ dest: 'uploads/' });
 
-// ───────────────────────────────────────────────────────────
-// MIDDLEWARE
-// ───────────────────────────────────────────────────────────
 app.use(cors());
 app.use(express.json());
-
-// Health-check
 app.get('/health', (_, res) => res.send('OK'));
 
-// ───────────────────────────────────────────────────────────
-// 1)  UPLOAD SINGLE 20-SEC SEGMENT
-// ───────────────────────────────────────────────────────────
+/* ─────────  1) upload-segment  ───────── */
 app.post('/upload-segment', upload.single('file'), async (req, res) => {
   try {
     const { file } = req;
-    const {
+    let {
       match_id,
       segment_start_time_in_game = 0,
-      duration = '00:00:20',           // ברירת מחדל 20 שניות
+      duration = '00:00:20',
     } = req.body;
+
+    match_id = resolveMatchId(match_id, segment_start_time_in_game);
 
     console.log('📥  Upload received:', {
       localPath : file.path,
@@ -50,7 +61,6 @@ app.post('/upload-segment', upload.single('file'), async (req, res) => {
       segment_start_time_in_game,
     });
 
-    // העלאה ל-Drive (תיקיית FULL_CLIPS)
     const uploaded = await uploadToDrive({
       filePath : file.path,
       metadata : {
@@ -63,87 +73,88 @@ app.post('/upload-segment', upload.single('file'), async (req, res) => {
     });
 
     console.log(`✅  Segment uploaded to Drive (fileId=${uploaded.external_id})`);
-
-    // ניקוי קובץ מקומי
     fs.unlink(file.path, () => {});
-
-    res.json({ success: true, clip: uploaded });
+    res.json({ success: true, clip: uploaded, match_id });
   } catch (err) {
     console.error('[UPLOAD ERROR]', err);
     res.status(500).json({ success: false, error: err.message });
   }
 });
 
-// ───────────────────────────────────────────────────────────
-// 2)  AUTO-GENERATE CLIPS FROM ACTIONS
-// ───────────────────────────────────────────────────────────
+/* ─────────  2) auto-generate-clips  ───────── */
 app.post('/auto-generate-clips', async (req, res) => {
-  const { match_id, actions = [], segments = [] } = req.body;
+  try {
+    let { match_id, actions = [], segments = [] } = req.body;
+    match_id = matchIdMap[match_id] || match_id;
 
-  console.log('✂️  Auto clip request received:', {
-    match_id,
-    actionsCount  : actions.length,
-    segmentsCount : segments.length,
-  });
+    console.log('✂️  Auto clip request received:', {
+      match_id,
+      actionsCount  : actions.length,
+      segmentsCount : segments.length,
+    });
 
-  // תשובה מידית לפורנט-אנד
-  res.json({ success: true, message: 'Clip generation started in background' });
+    res.json({ success: true, message: 'Clip generation started' });
 
-  // עיבוד ברקע
-  for (const action of actions) {
-    try {
+    for (const action of actions) {
       const seg = segments.find(s => {
         const start = Number(s.segment_start_time_in_game);
         const end   = start + Number(s.duration || 20);
         return action.timestamp_in_game >= start && action.timestamp_in_game < end;
       });
-
       if (!seg) {
         console.warn(`⚠️  No segment for action at ${action.timestamp_in_game}s`);
         continue;
       }
+      const rel = action.timestamp_in_game - Number(seg.segment_start_time_in_game);
+      let startSec = Math.max(0, rel - 8);
+      let previousFileId = null;
+      if (rel < 3) {
+        const prevSeg = segments[segments.indexOf(seg) - 1];
+        if (prevSeg) {
+          previousFileId = prevSeg.file_id;
+          startSec = Number(seg.duration || 20) + rel - 8;
+        }
+      }
 
-      const relativeStart = action.timestamp_in_game - Number(seg.segment_start_time_in_game);
-      const clipStartSec  = Math.max(0, relativeStart - 8);  // 8 שניות לפני האירוע
-      const clipDuration  = 8;
-
-      console.log(`✂️  Cutting clip from file ${seg.file_id} @${clipStartSec}s for ${clipDuration}s`);
-
-      const clip = await cutClipFromDriveFile({
-        fileId           : seg.file_id,
-        startTimeInSec   : clipStartSec,
-        durationInSec    : clipDuration,
-        matchId          : match_id,
-        actionType       : action.action_type,
-        playerName       : action.player_name,
-        teamColor        : action.team_color,
-        assistPlayerName : action.assist_player_name,
+      console.log(`✂️  Cutting clip ${seg.file_id} @${startSec}s`);
+      await cutClipFromDriveFile({
+        fileId          : seg.file_id,
+        previousFileId,
+        startTimeInSec  : startSec,
+        durationInSec   : 8,
+        matchId         : match_id,
+        actionType      : action.action_type,
+        playerName      : action.player_name,
+        teamColor       : action.team_color,
+        assistPlayerName: action.assist_player_name,
+        segmentStartTimeInGame: seg.segment_start_time_in_game
       });
-
-      console.log(`🎬  Short clip uploaded (fileId=${clip.external_id})`);
-    } catch (err) {
-      console.error('[CLIP ERROR]', err);
     }
-  }
+  } catch (err) { console.error('[CLIP ERROR]', err); }
 });
 
-// ───────────────────────────────────────────────────────────
-// 3)  LIST CLIPS  (דף מדיה / סטטיסטיקה בבייס44)
-// ───────────────────────────────────────────────────────────
-app.get('/clips', async (req, res) => {
+/* ─────────  3) clips feed  ───────── */
+app.get('/clips', async (_, res) => {
   try {
-    // מפנה ל-segmentsManager / Google-Drive list …
-    // השאר ללא שינוי אם כבר קיים אצלך; אחרת החזר 501.
-    res.status(501).json({ error: 'Not implemented in this snippet' });
+    const list = await drive.files.list({
+      q       : `'${SHORT_CLIPS_FOLDER_ID}' in parents and trashed=false`,
+      fields  : 'files(id,name,createdTime,properties)',
+      orderBy : 'createdTime desc'
+    });
+    const clips = list.data.files.map(f => ({
+      external_id  : f.id,
+      name         : f.name,
+      view_url     : `https://drive.google.com/file/d/${f.id}/view`,
+      download_url : `https://drive.google.com/uc?export=download&id=${f.id}`,
+      created_date : f.createdTime,
+      ...f.properties
+    }));
+    res.json(clips);
   } catch (err) {
     console.error('[CLIPS LIST ERROR]', err);
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: 'Drive list failed' });
   }
 });
 
-// ───────────────────────────────────────────────────────────
-// START SERVER
-// ───────────────────────────────────────────────────────────
-app.listen(PORT, () => {
-  console.log(`📡  Server listening on port ${PORT}`);
-});
+/* ─────────  start ───────── */
+app.listen(PORT, () => console.log(`📡  Server listening on port ${PORT}`));
