@@ -8,7 +8,7 @@ const { v4: uuidv4 } = require('uuid');
 const {
   uploadToDrive,
   cutClipFromDriveFile,
-  formatTime               // ⬅️ ייבוא קיים מ-segmentsManager
+  formatTime
 } = require('./segmentsManager');
 
 const app    = express();
@@ -60,7 +60,7 @@ app.post('/upload-segment', upload.single('file'), async (req, res) => {
 
 /*─────────────────────────── 2) auto-generate-clips ───────────────*/
 app.post('/auto-generate-clips', async (req, res) => {
-  const { match_id, actions = [], segments = [] } = req.body;
+  const { match_id, actions = [], segments = [] } = req.body;   // ← match_id  ✅
 
   console.log('✂️  Auto clip request received:', {
     match_id,
@@ -71,7 +71,7 @@ app.post('/auto-generate-clips', async (req, res) => {
 
   for (const action of actions) {
     try {
-      /*── מוצאים המקטע המתאים ──*/
+      /*── מוצאים את המקטע המתאים ──*/
       const seg = segments.find(s => {
         const s0 = Number(s.segment_start_time_in_game);
         const s1 = s0 + Number(s.duration || 20);
@@ -84,7 +84,7 @@ app.post('/auto-generate-clips', async (req, res) => {
 
       const relative = action.timestamp_in_game - Number(seg.segment_start_time_in_game);
 
-      /*── NEW LOGIC: add previous segment אם <3s ──*/
+      /*── previous segment if <3s ──*/
       let previousFileId = null;
       let startSec       = Math.max(0, relative - 8);
 
@@ -97,7 +97,7 @@ app.post('/auto-generate-clips', async (req, res) => {
         }
       }
 
-      const startTimeStr = formatTime(startSec);   // uniform "HH:MM:SS"
+      const startTimeStr = formatTime(startSec);
       console.log(
         `✂️  Cutting clip ${seg.file_id}` +
         (previousFileId ? ` (+prev ${previousFileId})` : '') +
@@ -109,7 +109,7 @@ app.post('/auto-generate-clips', async (req, res) => {
         previousFileId,
         startTimeInSec   : startTimeStr,
         durationInSec    : 8,
-        matchId,
+        matchId          : match_id,                 // ← השתמש ב-match_id
         actionType       : action.action_type,
         playerName       : action.player_name,
         teamColor        : action.team_color,
