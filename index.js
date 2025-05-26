@@ -1,134 +1,92 @@
-/* ---------- imports והגדרות שכבר קיימות אצלך ---------- */
-const express  = require('express');
-const cors     = require('cors');
-const multer   = require('multer');
-const fs       = require('fs');
-const { google } = require('googleapis');
-const {
-  uploadToDrive,
-  formatTime,
-  cutClipFromDriveFile
-} = require('./segmentsManager');
+const express = require('express');
+const multer = require('multer');
+const cors = require('cors');
+const { v4: uuidv4 } = require('uuid');
+const { cutClipFromDriveFile } = require('./segmentsManager');
+const { autoGenerateClips } = require('./autoGenerateClips');
+const { uploadToDrive } = require('./uploadToDrive');
+const path = require('path');
+const fs = require('fs');
 
-/* ---------- Google Drive ---------- */
-const SCOPES = ['https://www.googleapis.com/auth/drive'];
-const auth   = new google.auth.GoogleAuth({ scopes: SCOPES });
-const drive  = google.drive({ version: 'v3', auth });
+const app = express();
+const PORT = process.env.PORT || 3000;
 
-/* ---------- helper: matchId (היה חסר ונוסף קודם) ---------- */
-const matchIdMap = Object.create(null);
-function resolveMatchId(origId, segStart) {
-  const first = Number(segStart) === 0;
-  if (!matchIdMap[origId] && first) {
-    matchIdMap[origId] = `${origId}_${Date.now()}`;
-    console.log(`🆕  New matchId → ${matchIdMap[origId]}`);
-  }
-  return matchIdMap[origId] || origId;
-}
+app.use(cors());
+app.use(express.json());
 
-/* ---------- app / CORS / body-parsers (ללא שינוי) ---------- */
-const app    = express();
 const upload = multer({ dest: 'uploads/' });
-app.use(cors({ origin: true }));
-app.use(express.json({ limit: '10mb' }));
-app.use(express.urlencoded({ extended: true }));
 
-/* ---------- health ---------- */
-app.get('/health', (_,res)=>res.send('OK'));
-
-/* ---------- upload-segment endpoint (כמו שהיה) ---------- */
-app.post('/upload-segment', upload.single('file'), async (req,res)=>{
+app.post('/upload-segment', upload.single('video'), async (req, res) => {
   try {
-    const { match_id:startId, segment_start_time_in_game } = req.body;
-    const file    = req.file;
-    const matchId = resolveMatchId(startId, segment_start_time_in_game);
+    const { originalname, path: localPath } = req.file;
+    const { match_id, segment_start_time_in_game } = req.body;
 
-    console.log('📤 Uploading segment:', {
-      name:file.originalname, matchId, segment_start_time_in_game
+    console.log(`📥 Upload received: ${originalname}`);
+    console.log(`📄 Local path: ${localPath}`);
+    console.log(`🎮 Match ID: ${match_id}, Segment start: ${segment_start_time_in_game}s`);
+
+    const name = originalname || `segment_${uuidv4()}.webm`;
+    const driveFile = await uploadToDrive(localPath, name, '1vu6elArxj6YKLZePXjoqp_UFrDiI5ZOC'); // Full_clips
+
+    console.log(`✅ Uploaded to Drive: ${driveFile.fileId}`);
+
+    res.status(200).json({
+      success: true,
+      fileId: driveFile.fileId,
+      match_id,
+      segment_start_time_in_game,
     });
 
-    const uploaded = await uploadToDrive({
-      filePath : file.path,
-      metadata : {
-        custom_name : file.originalname,
-        match_id    : matchId,
-        duration    : req.body.end_time || '00:00:20',
-        segment_start_time_in_game
-      },
-      isFullClip:true
-    });
-
-    res.json({ success:true, clip:uploaded, match_id:matchId });
-  } catch(err){
+    fs.unlink(localPath, () => {});
+  } catch (err) {
     console.error('[UPLOAD ERROR]', err);
-    res.status(500).json({ success:false, error:err.message });
+    res.status(500).json({ success: false, error: 'Upload failed' });
   }
 });
 
-/* ------------------------------------------------------------------
-   🛠  **תיקון** – /auto-generate-clips
-   ------------------------------------------------------------------ */
+app.post('/auto-generate-clips', async (req, res) => {
+  const { match_id, actions, segments } = req.body;
+  console.log(`✂️ Auto clip request received: ${JSON.stringify({ match_id, actionsCount: actions.length, segmentsCount: segments.length })}`);
 
-/* ממיר "hh:mm:ss" -> seconds */
-function hmsToSeconds(str){
-  if(!str || typeof str !== 'string' || !str.includes(':')) return Number(str)||0;
-  const [h,m,s] = str.split(':').map(Number);
-  return (h||0)*3600 + (m||0)*60 + (s||0);
-}
+  res.status(200).json({ success: true, message: 'Clip generation started in background' });
 
-app.post('/auto-generate-clips', async (req,res)=>{
   try {
-    const { match_id:startId, actions=[], segments=[] } = req.body;
-    const matchId = matchIdMap[startId] || startId;
-
-    console.log('✂️ Auto clip request:', { matchId, actions:actions.length, segments:segments.length });
-    res.json({ success:true, message:'processing', match_id:matchId });
-
-    for (const act of actions){
-      const { timestamp_in_game, action_type, player_name,
-              team_color='', assist_player_name='' } = act;
-
-      /* --- מציאת סגמנט --- */
-      const seg = segments.find(s=>{
-        const segStart = Number(s.segment_start_time_in_game);
-        const segDur   = hmsToSeconds(s.duration) || 20;   // <-- תיקון
-        const segEnd   = segStart + segDur;
-        return timestamp_in_game >= segStart && timestamp_in_game < segEnd;
+    for (const action of actions) {
+      const segment = segments.find(s => {
+        return (
+          action.timestamp_in_game >= s.segment_start_time_in_game &&
+          action.timestamp_in_game < s.segment_start_time_in_game + 20
+        );
       });
 
-      if(!seg){
-        console.warn(`⚠️  No segment found for action @${timestamp_in_game}s`);
+      if (!segment) {
+        console.warn(`⚠️ No segment found for action at ${action.timestamp_in_game}s`);
         continue;
       }
 
-      const relative = timestamp_in_game - Number(seg.segment_start_time_in_game);
-      const startSec = Math.max(0, relative - 8);
-      const durSec   = Math.min(8, relative);
+      const startTimeInSegment = Math.max(0, action.timestamp_in_game - segment.segment_start_time_in_game - 2);
+      const clip = await cutClipFromDriveFile({
+        fileId: segment.file_id,
+        startTimeInSec: startTimeInSegment,
+        durationInSec: 8,
+        matchId: match_id,
+        actionType: action.action_type,
+        playerName: action.player_name,
+        assistPlayerName: action.assist_player_name,
+        teamColor: action.team_color,
+      });
 
-      console.log(`✂️  Cutting clip ${seg.file_id} @${startSec}s for ${durSec}s`);
-
-      try{
-        await cutClipFromDriveFile({
-          fileId         : seg.file_id,
-          matchId,
-          startTimeInSec : startSec,
-          durationInSec  : durSec,
-          actionType     : action_type,
-          playerName     : player_name,
-          teamColor      : team_color,
-          assistPlayerName: assist_player_name
-        });
-      }catch(e){
-        console.error(`[CUT ERROR] ${e.message}`);
-      }
+      console.log(`🎬 Clip created: ${clip.name}`);
     }
-  }catch(err){
-    console.error('[AUTO-CLIP ERROR]', err);
+  } catch (err) {
+    console.error('✂️ Error generating clips:', err);
   }
 });
 
-/* ---------- endpoints /generate-clips, /clips (ללא שינוי) ---------- */
+app.get('/clips', async (req, res) => {
+  // נקרא ע"י דף המדיה/סטטיסטיקות
+});
 
-/* ---------- start server ---------- */
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, ()=>console.log(`📡 Server listening on port ${PORT}`));
+app.listen(PORT, () => {
+  console.log(`📡 Server listening on port ${PORT}`);
+});
