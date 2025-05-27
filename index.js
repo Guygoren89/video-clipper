@@ -16,6 +16,7 @@ const SCOPES = ['https://www.googleapis.com/auth/drive'];
 const auth   = new google.auth.GoogleAuth({ scopes: SCOPES });
 const drive  = google.drive({ version: 'v3', auth });
 
+const FULL_CLIPS_FOLDER_ID  = '1vu6elArxj6YKLZePXjoqp_UFrDiI5ZOC';
 const SHORT_CLIPS_FOLDER_ID = '1Lb0MSD-CKIsy1XCqb4b4ROvvGidqtmzU';
 
 /* helper: "00:00:20" → 20 (sec) */
@@ -89,7 +90,7 @@ app.post('/auto-generate-clips', async (req, res) => {
       /* locate current segment */
       const seg = segsByTime.find(s => {
         const start = Number(s.segment_start_time_in_game);
-        const dur   = toSeconds(s.duration) || 20;           // ← תיקון כאן
+        const dur   = toSeconds(s.duration) || 20;
         return action.timestamp_in_game >= start &&
                action.timestamp_in_game <  start + dur;
       });
@@ -168,6 +169,43 @@ app.get('/clips', async (req,res) => {
     res.json(clips);
   } catch (err) {
     console.error('[CLIPS ERROR]', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/* ───────── full-clip lookup (/full-clip?match_id=..&start=..) ───────── */
+app.get('/full-clip', async (req, res) => {
+  const { match_id, start } = req.query;          // start => "320"
+  if (!match_id || start === undefined) {
+    return res.status(400).json({ error: 'match_id & start required' });
+  }
+
+  try {
+    const qParts = [
+      `'${FULL_CLIPS_FOLDER_ID}' in parents`,
+      'trashed = false',
+      `properties has { key='match_id' and value='${match_id}' }`,
+      `properties has { key='segment_start_time_in_game' and value='${start}' }`
+    ];
+
+    const resp = await drive.files.list({
+      q        : qParts.join(' and '),
+      pageSize : 1,
+      fields   : 'files(id,name)'
+    });
+
+    if (!resp.data.files.length) {
+      return res.status(404).json({ error: 'full segment not found' });
+    }
+
+    const id = resp.data.files[0].id;
+    res.json({
+      name         : resp.data.files[0].name,
+      download_url : `https://drive.google.com/uc?export=download&id=${id}`,
+      view_url     : `https://drive.google.com/file/d/${id}/view`
+    });
+  } catch (err) {
+    console.error('[FULL-CLIP ERROR]', err);
     res.status(500).json({ error: err.message });
   }
 });
