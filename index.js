@@ -28,7 +28,7 @@ function toSeconds(val) {
   return Number.isNaN(n) ? 0 : n;
 }
 
-/* ─────────────────────────────  app ─────────────────────────────── */
+/* ───────────────────────────── app ─────────────────────────────── */
 const app    = express();
 const PORT   = process.env.PORT || 3000;
 const upload = multer({ dest: 'uploads/' });
@@ -37,14 +37,145 @@ app.use(cors());
 app.use(express.json());
 app.get('/health', (_, res) => res.send('OK'));
 
-/* ……………………… ( /upload-segment , /auto-generate-clips , /clips ) – נשארו ללא שינוי …………………… */
+/* ───────────── upload-segment (20 s) ───────────── */
+app.post('/upload-segment', upload.single('file'), async (req, res) => {
+  try {
+    const { file } = req;
+    const { match_id, segment_start_time_in_game = 0, duration = '00:00:20' } = req.body;
+
+    console.log('📥 Upload received:', {
+      localPath : file.path,
+      name      : file.originalname,
+      sizeMB    : (file.size/1024/1024).toFixed(2),
+      match_id,
+      segment_start_time_in_game
+    });
+
+    const uploaded = await uploadToDrive({
+      filePath : file.path,
+      metadata : {
+        custom_name : file.originalname || `segment_${uuidv4()}.webm`,
+        match_id,
+        duration,
+        segment_start_time_in_game
+      },
+      isFullClip : true
+    });
+
+    console.log(`✅ Segment uploaded (id=${uploaded.external_id})`);
+    fs.unlink(file.path, () => {});
+    res.json({ success: true, clip: uploaded });
+  } catch (err) {
+    console.error('[UPLOAD ERROR]', err);
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+/* ───────────── auto-generate-clips (SHORT) ───────────── */
+app.post('/auto-generate-clips', async (req, res) => {
+  const { match_id, actions = [], segments = [] } = req.body;
+
+  console.log('✂️ Auto clip request:', {
+    match_id, actions: actions.length, segments: segments.length
+  });
+  res.json({ success: true });               // reply immediately
+
+  /* sort by start-time */
+  const segsByTime = [...segments].sort(
+    (a,b) => Number(a.segment_start_time_in_game) - Number(b.segment_start_time_in_game)
+  );
+
+  for (const action of actions) {
+    try {
+      /* locate current segment */
+      const seg = segsByTime.find(s => {
+        const start = Number(s.segment_start_time_in_game);
+        const dur   = toSeconds(s.duration) || 20;
+        return action.timestamp_in_game >= start &&
+               action.timestamp_in_game <  start + dur;
+      });
+      if (!seg) {
+        console.warn(`⚠️ No segment for ${action.timestamp_in_game}s`);
+        continue;
+      }
+
+      /* relative position & optional merge */
+      const rel = action.timestamp_in_game - Number(seg.segment_start_time_in_game);
+      let   startSec = Math.max(0, rel - 8);
+      let   prevSeg  = null;
+
+      if (rel <= 3) {
+        prevSeg = segsByTime
+          .filter(s => Number(s.segment_start_time_in_game) < Number(seg.segment_start_time_in_game))
+          .pop();
+        if (prevSeg) {
+          startSec = (toSeconds(prevSeg.duration) || 20) + rel - 8;
+          if (startSec < 0) startSec = 0;
+        }
+      }
+
+      console.log(`✂️ Cutting ${seg.file_id}${prevSeg?' +prev':''} @${startSec}s`);
+      await cutClipFromDriveFile({
+        fileId                 : seg.file_id,
+        previousFileId         : prevSeg ? prevSeg.file_id : null,
+        startTimeInSec         : startSec,
+        durationInSec          : 8,
+        matchId                : match_id,
+        actionType             : action.action_type,
+        playerName             : action.player_name,
+        teamColor              : action.team_color,
+        assistPlayerName       : action.assist_player_name,
+        segmentStartTimeInGame : seg.segment_start_time_in_game
+      });
+    } catch (err) {
+      console.error('[CLIP ERROR]', err);
+    }
+  }
+});
+
+/* ───────────── clips feed  (/clips?limit&before) ───────────── */
+app.get('/clips', async (req,res) => {
+  try {
+    const limit  = Math.min(Number(req.query.limit)||100, 200);
+    const before = req.query.before ? new Date(req.query.before).toISOString() : null;
+
+    const qParts = [
+      `'${SHORT_CLIPS_FOLDER_ID}' in parents`,
+      'trashed = false'
+    ];
+    if (before) qParts.push(`createdTime < '${before}'`);
+
+    const resp = await drive.files.list({
+      q        : qParts.join(' and '),
+      pageSize : limit,
+      fields   : 'files(id,name,createdTime,properties)',
+      orderBy  : 'createdTime desc'
+    });
+
+    const clips = resp.data.files.map(f => ({
+      external_id : f.id,
+      name        : f.name,
+      view_url    : `https://drive.google.com/file/d/${f.id}/view`,
+      download_url: `https://drive.google.com/uc?export=download&id=${f.id}`,
+      created_date: f.createdTime,
+      match_id    : f.properties?.match_id || '',
+      action_type : f.properties?.action_type || '',
+      player_name : f.properties?.player_name || '',
+      team_color  : f.properties?.team_color || '',
+      assist_player_name        : f.properties?.assist_player_name || '',
+      segment_start_time_in_game: f.properties?.segment_start_time_in_game || ''
+    }));
+
+    res.json(clips);
+  } catch (err) {
+    console.error('[CLIPS ERROR]', err);
+    res.status(500).json({ error: err.message });
+  }
+});
 
 /* ───────────── FULL-CLIP helper – חדש ─────────────
    GET /full-clip?match_id=…&start=…
-   ➜ מחזיר עד שני קבצי FULL שהכי קרובים ל-start:
-      • הקטע עם start_time ≤ start (הקודם/שווה)
-      • הקטע הבא אחריו (אם קיים)
-   מחזיר ‎200‎ עם מערך [{download_url,…}, …]  או ‎404‎ אם לא נמצא.
+   ➜ מחזיר עד שני קבצי FULL שהכי קרובים ל-start
 */
 app.get('/full-clip', async (req, res) => {
   try {
@@ -52,7 +183,7 @@ app.get('/full-clip', async (req, res) => {
     if (!match_id || start === undefined)
       return res.status(400).json({ error: 'Missing match_id or start' });
 
-    /* 1. מביאים את כל full-segments של אותו משחק */
+    /* 1. bring all full segments for that match */
     const listResp = await drive.files.list({
       q: [
         `'${FULL_CLIPS_FOLDER_ID}' in parents`,
@@ -63,7 +194,7 @@ app.get('/full-clip', async (req, res) => {
       fields   : 'files(id,name,properties)',
     });
 
-    /* 2. מיון לפי segment_start_time_in_game (מספרי) */
+    /* 2. sort by segment_start_time_in_game */
     const files = (listResp.data.files || [])
       .filter(f => f.properties?.segment_start_time_in_game !== undefined)
       .sort((a,b) =>
@@ -95,7 +226,7 @@ app.get('/full-clip', async (req, res) => {
     if (!candidates.length)
       return res.status(404).json({ error: 'No suitable full clips found' });
 
-    res.json(candidates);          // <-- מערך (אחד או שניים)
+    res.json(candidates);          // array: 1 or 2 items
   } catch (err) {
     console.error('[FULL-CLIP ERROR]', err);
     res.status(500).json({ error: err.message });
