@@ -1,23 +1,25 @@
 // autoGenerateClips.js
 const { cutClipFromDriveFile } = require('./segmentsManager');
 
-/* ─────────── הגדרות חדשות ─────────── */
-const BACKWARD_OFFSET_SEC = 13;   // כמה שניות ללכת אחורה
-const CLIP_DURATION_SEC   = 12;   // אורך הקליפ
+/* ─────────── הגדרות גמישות ─────────── */
+const BACKWARD_OFFSET_SEC = 13;   // כמה שניות ללכת אחורה מהלחיצה
+const CLIP_DURATION_SEC   = 12;   // אורך הקליפ הסופי שנחתך
 
 /* helper */
 const toSeconds = v =>
-  typeof v === 'number'           ? v :
-  (v && v.includes(':'))          ? v.split(':').map(Number).reduce((t,n)=>t*60+n,0) :
-                                     Number(v) || 0;
+  typeof v === 'number'
+    ? v
+    : (v && v.includes(':'))
+      ? v.split(':').map(Number).reduce((t, n) => t * 60 + n, 0)
+      : Number(v) || 0;
 
 /**
- * יוצר קליפים לפי רשימת פעולות.
- * – אם הפעולה ≤3 s מתחילת הסגמנט → מצרפים את הסגמנט הקודם למיזוג.
+ * יוצר קליפים קצרים אוטומטית לפי רשימת פעולות.
+ * – אם הפעולה מתרחשת ≤ 3 s מתחילת הסגמנט → מצרפים את הסגמנט הקודם למיזוג.
  */
 async function autoGenerateClips(
-  actions  = [],
-  matchId  = `auto_match_${Date.now()}`,
+  actions = [],
+  matchId = `auto_match_${Date.now()}`,
   segments = []
 ) {
   const results = [];
@@ -40,7 +42,7 @@ async function autoGenerateClips(
         return timestamp_in_game >= start && timestamp_in_game < start + dur;
       });
       if (!seg) {
-        results.push({ success:false, error:'No segment', timestamp_in_game });
+        results.push({ success: false, error: 'No segment', timestamp_in_game });
         continue;
       }
 
@@ -48,7 +50,7 @@ async function autoGenerateClips(
       let   startSec       = Math.max(0, relative - BACKWARD_OFFSET_SEC);
       let   previousFileId = null;
 
-      /* merge previous if action very מוקדם */
+      /* אם הפעולה ממש בתחילת הסגמנט – מנסים למזג את הסגמנט הקודם */
       if (relative <= 3) {
         const idx = segments.indexOf(seg);
         if (idx > 0) {
@@ -74,7 +76,7 @@ async function autoGenerateClips(
 
       results.push(clip);
     } catch (err) {
-      results.push({ success:false, error:err.message, timestamp_in_game });
+      results.push({ success: false, error: err.message, timestamp_in_game });
     }
   }
 
