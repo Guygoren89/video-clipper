@@ -1,15 +1,19 @@
 // autoGenerateClips.js
 const { cutClipFromDriveFile } = require('./segmentsManager');
 
+/* ─────────── הגדרות חדשות ─────────── */
+const BACKWARD_OFFSET_SEC = 13;   // כמה שניות ללכת אחורה
+const CLIP_DURATION_SEC   = 12;   // אורך הקליפ
+
 /* helper */
 const toSeconds = v =>
-  typeof v === 'number' ? v
-  : (v && v.includes(':')) ? v.split(':').map(Number).reduce((t,n)=>t*60+n,0)
-  : Number(v) || 0;
+  typeof v === 'number'           ? v :
+  (v && v.includes(':'))          ? v.split(':').map(Number).reduce((t,n)=>t*60+n,0) :
+                                     Number(v) || 0;
 
 /**
- * יוצר קליפים קצרים אוטומטית לפי רשימת פעולות.
- * – אם הפעולה מתרחשת עד 3 s מתחילת הסגמנט → מצרפים את הסגמנט הקודם למיזוג.
+ * יוצר קליפים לפי רשימת פעולות.
+ * – אם הפעולה ≤3 s מתחילת הסגמנט → מצרפים את הסגמנט הקודם למיזוג.
  */
 async function autoGenerateClips(
   actions  = [],
@@ -21,7 +25,7 @@ async function autoGenerateClips(
   for (const action of actions) {
     const {
       timestamp_in_game,
-      duration           = 8,
+      duration           = CLIP_DURATION_SEC,
       action_type        = 'auto_clip',
       player_name        = '',
       team_color         = '',
@@ -32,9 +36,8 @@ async function autoGenerateClips(
       /* locate segment */
       const seg = segments.find(s => {
         const start = Number(s.segment_start_time_in_game);
-        const dur   = toSeconds(s.duration) || 20;            // ← תיקון כאן
-        return timestamp_in_game >= start &&
-               timestamp_in_game <  start + dur;
+        const dur   = toSeconds(s.duration) || 20;
+        return timestamp_in_game >= start && timestamp_in_game < start + dur;
       });
       if (!seg) {
         results.push({ success:false, error:'No segment', timestamp_in_game });
@@ -42,15 +45,16 @@ async function autoGenerateClips(
       }
 
       const relative       = timestamp_in_game - Number(seg.segment_start_time_in_game);
-      let   startSec       = Math.max(0, relative - 8);
+      let   startSec       = Math.max(0, relative - BACKWARD_OFFSET_SEC);
       let   previousFileId = null;
 
+      /* merge previous if action very מוקדם */
       if (relative <= 3) {
         const idx = segments.indexOf(seg);
         if (idx > 0) {
           const prev = segments[idx - 1];
           previousFileId = prev.file_id;
-          startSec = (toSeconds(prev.duration) || 20) + relative - 8;
+          startSec = (toSeconds(prev.duration) || 20) + relative - BACKWARD_OFFSET_SEC;
           if (startSec < 0) startSec = 0;
         }
       }
