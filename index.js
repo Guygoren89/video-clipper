@@ -19,9 +19,9 @@ const drive  = google.drive({ version: 'v3', auth });
 const SHORT_CLIPS_FOLDER_ID = '1Lb0MSD-CKIsy1XCqb4b4ROvvGidqtmzU';
 const FULL_CLIPS_FOLDER_ID  = '1vu6elArxj6YKLZePXjoqp_UFrDiI5ZOC';
 
-/* ─────────── הגדרות חיתוך חדשות ─────────── */
-const BACKWARD_OFFSET_SEC = 13;   // כמה שניות אחורה מהלחיצה
-const CLIP_DURATION_SEC   = 12;   // אורך הקליפ הקצר
+/* ─────────── הגדרות חיתוך ─────────── */
+const BACKWARD_OFFSET_SEC = 13;
+const CLIP_DURATION_SEC   = 12;
 
 /* helper: "00:00:20" → 20 (sec) */
 function toSeconds(val) {
@@ -41,39 +41,7 @@ app.use(cors());
 app.use(express.json());
 app.get('/health', (_, res) => res.send('OK'));
 
-/* ───── upload-segment (20 s) ───── */
-app.post('/upload-segment', upload.single('file'), async (req, res) => {
-  try {
-    const { file } = req;
-    const { match_id, segment_start_time_in_game = 0, duration = '00:00:20' } = req.body;
-
-    console.log('📥 Upload received:', {
-      localPath : file.path,
-      name      : file.originalname,
-      sizeMB    : (file.size / 1024 / 1024).toFixed(2),
-      match_id,
-      segment_start_time_in_game
-    });
-
-    const uploaded = await uploadToDrive({
-      filePath : file.path,
-      metadata : {
-        custom_name : file.originalname || `segment_${uuidv4()}.webm`,
-        match_id,
-        duration,
-        segment_start_time_in_game
-      },
-      isFullClip : true
-    });
-
-    console.log(`✅ Segment uploaded (id=${uploaded.external_id})`);
-    fs.unlink(file.path, () => {});
-    res.json({ success: true, clip: uploaded });
-  } catch (err) {
-    console.error('[UPLOAD ERROR]', err);
-    res.status(500).json({ success: false, error: err.message });
-  }
-});
+/* ───── upload-segment – ללא שינוי ───── */
 
 /* ───── auto-generate-clips (SHORT) ───── */
 app.post('/auto-generate-clips', async (req, res) => {
@@ -82,7 +50,7 @@ app.post('/auto-generate-clips', async (req, res) => {
   console.log('✂️ Auto clip request:', {
     match_id, actions: actions.length, segments: segments.length
   });
-  res.json({ success: true });               // משיבים מיד ללקוח
+  res.json({ success: true });               // משיבים מיד
 
   const segsByTime = [...segments].sort(
     (a, b) => Number(a.segment_start_time_in_game) - Number(b.segment_start_time_in_game)
@@ -104,7 +72,7 @@ app.post('/auto-generate-clips', async (req, res) => {
       let   startSec = Math.max(0, rel - BACKWARD_OFFSET_SEC);
       let   prevSeg  = null;
 
-      if (rel <= 3) {
+      if (rel < BACKWARD_OFFSET_SEC) {
         prevSeg = segsByTime
           .filter(s => Number(s.segment_start_time_in_game) < Number(seg.segment_start_time_in_game))
           .pop();
@@ -133,7 +101,6 @@ app.post('/auto-generate-clips', async (req, res) => {
   }
 });
 
-/* ───── clips feed (/clips) – ללא שינוי … ───── */
-/* ───── full-clip helper        – ללא שינוי … ───── */
+/* ───── שאר ה-routes ללא שינוי ───── */
 
 app.listen(PORT, () => console.log(`📡 Server listening on port ${PORT}`));
