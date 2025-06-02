@@ -15,7 +15,7 @@ const toSeconds = v =>
 
 /**
  * יוצר קליפים קצרים אוטומטית לפי רשימת פעולות.
- * – אם הפעולה מתרחשת ≤ 3 s מתחילת הסגמנט → מצרפים את הסגמנט הקודם למיזוג.
+ * – אם הפעולה מתרחשת < BACKWARD_OFFSET_SEC מתחילת הסגמנט → מצרפים את הסגמנט הקודם למיזוג.
  */
 async function autoGenerateClips(
   actions = [],
@@ -50,8 +50,8 @@ async function autoGenerateClips(
       let   startSec       = Math.max(0, relative - BACKWARD_OFFSET_SEC);
       let   previousFileId = null;
 
-      /* אם הפעולה ממש בתחילת הסגמנט – מנסים למזג את הסגמנט הקודם */
-      if (relative <= 3) {
+      /* מיזוג עם הסגמנט הקודם במידת הצורך */
+      if (relative < BACKWARD_OFFSET_SEC) {
         const idx = segments.indexOf(seg);
         if (idx > 0) {
           const prev = segments[idx - 1];
