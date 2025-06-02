@@ -13,7 +13,7 @@ const {
   cutClipFromDriveFile
 } = require('./segmentsManager');
 
-/* ───── Google Drive ───── */
+/* ─────────── Google Drive ─────────── */
 const auth = new google.auth.GoogleAuth({
   scopes: ['https://www.googleapis.com/auth/drive']
 });
@@ -22,24 +22,29 @@ const drive = google.drive({ version: 'v3', auth });
 const SHORT_CLIPS_FOLDER_ID = '1Lb0MSD-CKIsy1XCqb4b4ROvvGidqtmzU';
 const FULL_CLIPS_FOLDER_ID  = '1vu6elArxj6YKLZePXjoqp_UFrDiI5ZOC';
 
-/* ───── חיתוך ───── */
+/* ─────────── חיתוך ─────────── */
 const BACKWARD_OFFSET_SEC = 13;
 const CLIP_DURATION_SEC   = 12;
 
-/* helper */                   /* (toSeconds – בלי שינוי) */
-function toSeconds(v){ /* … */ }
+/* helper */
+function toSeconds(v){
+  if (!v) return 0;
+  if (typeof v === 'number') return v;
+  if (v.includes(':')) return v.split(':').map(Number).reduce((t,n)=>t*60+n,0);
+  const n = Number(v); return Number.isNaN(n)?0:n;
+}
 
-/* ───── app ───── */
+/* ───────────── app ───────────── */
 const app  = express();
 const PORT = process.env.PORT || 3000;
 
-/* Multer – נכתוב ל-/tmp/uploads (תמיד קיים) */
+/* Multer – כותבים ל-/tmp/uploads */
 const uploadDir = path.join(os.tmpdir(), 'uploads');
 fs.mkdirSync(uploadDir, { recursive: true });
 
 const upload = multer({
   dest   : uploadDir,
-  limits : { fileSize: 50 * 1024 * 1024 }     // 50 MB למקטע
+  limits : { fileSize: 50 * 1024 * 1024 }
 });
 
 app.use(cors());
@@ -124,10 +129,95 @@ app.post('/auto-generate-clips', async (req,res)=>{
   }
 });
 
+/* ───── clips feed  (/clips?limit&before) ───── */
+app.get('/clips', async (req,res)=>{
+  try{
+    const limit  = Math.min(Number(req.query.limit)||100, 200);
+    const before = req.query.before ? new Date(req.query.before).toISOString() : null;
+
+    const q = [
+      `'${SHORT_CLIPS_FOLDER_ID}' in parents`,
+      'trashed = false'
+    ];
+    if (before) q.push(`createdTime < '${before}'`);
+
+    const resp = await drive.files.list({
+      q        : q.join(' and '),
+      pageSize : limit,
+      fields   : 'files(id,name,createdTime,properties)',
+      orderBy  : 'createdTime desc'
+    });
+
+    const clips = (resp.data.files||[]).map(f=>({
+      external_id : f.id,
+      name        : f.name,
+      view_url    : `https://drive.google.com/file/d/${f.id}/view`,
+      download_url: `https://drive.google.com/uc?export=download&id=${f.id}`,
+      created_date: f.createdTime,
+      match_id    : f.properties?.match_id || '',
+      action_type : f.properties?.action_type || '',
+      player_name : f.properties?.player_name || '',
+      team_color  : f.properties?.team_color || '',
+      assist_player_name        : f.properties?.assist_player_name || '',
+      segment_start_time_in_game: f.properties?.segment_start_time_in_game || ''
+    }));
+
+    res.json(clips);
+  }catch(e){
+    console.error('[CLIPS]',e);
+    res.status(500).json({ success:false, error:e.message });
+  }
+});
+
+/* ───── FULL-CLIP helper  (/full-clip) ───── */
+app.get('/full-clip', async (req,res)=>{
+  try{
+    const { match_id, start } = req.query;
+    if(!match_id||start===undefined) return res.status(400).json({ error:'Missing params' });
+
+    const list = await drive.files.list({
+      q: [
+        `'${FULL_CLIPS_FOLDER_ID}' in parents`,
+        'trashed = false',
+        `properties has { key='match_id' and value='${match_id}' }`
+      ].join(' and '),
+      pageSize:1000,
+      fields :'files(id,name,properties)'
+    });
+
+    const files = (list.data.files||[])
+      .filter(f=>f.properties?.segment_start_time_in_game!==undefined)
+      .sort((a,b)=>Number(a.properties.segment_start_time_in_game)-Number(b.properties.segment_start_time_in_game));
+
+    if(!files.length) return res.status(404).json({ error:'no full clips' });
+
+    const sNum = Number(start);
+    let prev=null, next=null;
+    for(const f of files){
+      const st=Number(f.properties.segment_start_time_in_game);
+      if(st<=sNum) prev=f;
+      if(st>sNum){ next=f; break; }
+    }
+    const cand=[prev,next].filter(Boolean).map(f=>({
+      external_id:f.id,
+      name:f.name,
+      match_id:f.properties.match_id,
+      segment_start_time_in_game:f.properties.segment_start_time_in_game,
+      view_url:`https://drive.google.com/file/d/${f.id}/view`,
+      download_url:`https://drive.google.com/uc?export=download&id=${f.id}`
+    }));
+    if(!cand.length) return res.status(404).json({ error:'no suitable full clips' });
+    res.json(cand);
+  }catch(e){
+    console.error('[FULL-CLIP]',e);
+    res.status(500).json({ error:e.message });
+  }
+});
+
 /* ───── fallback JSON error ───── */
 app.use((err,req,res,next)=>{
   console.error('[EXPRESS]',err);
-  res.status(err.status||500).json({ success:false, error:err.message||'server'} );
+  res.status(err.status||500).json({ success:false, error:err.message||'server' });
 });
 
 app.listen(PORT, ()=>console.log(`📡 server on ${PORT}`));
