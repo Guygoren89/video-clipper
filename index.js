@@ -62,7 +62,7 @@ async function callBase44Function(functionName, payload, extraHeaders = {}) {
   ensureBase44Env();
 
   const response = await fetch(
-    `https://api.base44.com/api/apps/${BASE44_APP_ID}/functions/${functionName}`,
+    `https://herut-football-6798c5e8.base44.app/api/apps/${BASE44_APP_ID}/functions/${functionName}`,
     {
       method: 'POST',
       headers: {
@@ -163,7 +163,7 @@ async function uploadProcessedClipToBase44({ goalId, filePath }) {
   form.append('goal_id', goalId);
 
   const response = await fetch(
-    `https://api.base44.com/api/apps/${BASE44_APP_ID}/functions/uploadProcessedClip`,
+    `https://herut-football-6798c5e8.base44.app/api/apps/${BASE44_APP_ID}/functions/uploadProcessedClip`,
     {
       method: 'POST',
       headers: {
@@ -498,7 +498,7 @@ app.get('/full-clip', async (req,res)=>{
       .filter(f=>f.properties?.segment_start_time_in_game!==undefined)
       .sort((a,b)=>Number(a.properties.segment_start_time_in_game)-Number(b.properties.segment_start_time_in_game));
 
-    if(!files.length) return res.status(404).json({ error:'no full clips' });
+    if(!files.length) return res.status(404).json({ error:'no suitable full clips' });
 
     const sNum = Number(start);
     let prev=null, next=null;
