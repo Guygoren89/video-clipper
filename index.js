@@ -1,10 +1,13 @@
 /* index.js – SERVER */
-const express  = require('express');
-const cors     = require('cors');
-const multer   = require('multer');
-const fs       = require('fs');
-const path     = require('path');
-const os       = require('os');
+const express = require('express');
+const cors = require('cors');
+const multer = require('multer');
+const fs = require('fs');
+const fsp = require('fs/promises');
+const path = require('path');
+const os = require('os');
+const { execFile } = require('child_process');
+const { promisify } = require('util');
 const { v4: uuidv4 } = require('uuid');
 const { google } = require('googleapis');
 
@@ -15,8 +18,17 @@ const {
 
 const {
   saveIncomingSegment,
-  pruneOldSegments
+  pruneOldSegments,
+  getSegmentsForClip
 } = require('./bufferManager');
+
+const execFileAsync = promisify(execFile);
+
+/* ─────────── ENV ─────────── */
+const BASE44_APP_ID = process.env.BASE44_APP_ID;
+const BASE44_API_KEY = process.env.BASE44_API_KEY;
+const BUFFER_WINDOW_SECONDS = Number(process.env.BUFFER_WINDOW_SECONDS || 300);
+const RENDER_INTERNAL_SECRET = process.env.RENDER_INTERNAL_SECRET || '';
 
 /* ─────────── Google Drive ─────────── */
 const auth = new google.auth.GoogleAuth({
@@ -25,22 +37,160 @@ const auth = new google.auth.GoogleAuth({
 const drive = google.drive({ version: 'v3', auth });
 
 const SHORT_CLIPS_FOLDER_ID = '1Lb0MSD-CKIsy1XCqb4b4ROvvGidqtmzU';
-const FULL_CLIPS_FOLDER_ID  = '1vu6elArxj6YKLZePXjoqp_UFrDiI5ZOC';
+const FULL_CLIPS_FOLDER_ID = '1vu6elArxj6YKLZePXjoqp_UFrDiI5ZOC';
 
 /* ─────────── חיתוך ─────────── */
 const BACKWARD_OFFSET_SEC = 13;
-const CLIP_DURATION_SEC   = 12;
+const CLIP_DURATION_SEC = 12;
 
 /* helper */
-function toSeconds(v){
+function toSeconds(v) {
   if (!v) return 0;
   if (typeof v === 'number') return v;
-  if (v.includes(':')) return v.split(':').map(Number).reduce((t,n)=>t*60+n,0);
-  const n = Number(v); return Number.isNaN(n)?0:n;
+  if (v.includes(':')) return v.split(':').map(Number).reduce((t, n) => t * 60 + n, 0);
+  const n = Number(v);
+  return Number.isNaN(n) ? 0 : n;
+}
+
+function ensureBase44Env() {
+  if (!BASE44_APP_ID || !BASE44_API_KEY) {
+    throw new Error('Missing BASE44_APP_ID or BASE44_API_KEY in environment variables');
+  }
+}
+
+async function callBase44Function(functionName, payload, extraHeaders = {}) {
+  ensureBase44Env();
+
+  const response = await fetch(
+    `https://api.base44.com/api/apps/${BASE44_APP_ID}/functions/${functionName}`,
+    {
+      method: 'POST',
+      headers: {
+        api_key: BASE44_API_KEY,
+        'Content-Type': 'application/json',
+        ...extraHeaders
+      },
+      body: JSON.stringify(payload || {})
+    }
+  );
+
+  const text = await response.text();
+
+  let data;
+  try {
+    data = text ? JSON.parse(text) : {};
+  } catch (e) {
+    throw new Error(`Invalid JSON from Base44 function ${functionName}: ${text}`);
+  }
+
+  if (!response.ok) {
+    throw new Error(`Base44 function ${functionName} failed: ${response.status} ${JSON.stringify(data)}`);
+  }
+
+  return data;
+}
+
+function getTargetCamera(teamSides, goalTeam) {
+  if (!teamSides || !teamSides.left || !teamSides.right) {
+    throw new Error('team_sides missing or incomplete');
+  }
+
+  const scoringSide = teamSides.left === goalTeam ? 'left' : 'right';
+  return scoringSide === 'left' ? 'right' : 'left';
+}
+
+async function ensureDir(dirPath) {
+  await fsp.mkdir(dirPath, { recursive: true });
+}
+
+async function concatAndTrimSegments({ segmentPaths, trimStart, outputPath }) {
+  if (!segmentPaths || segmentPaths.length === 0) {
+    throw new Error('No segment paths provided');
+  }
+
+  if (segmentPaths.length === 1) {
+    await execFileAsync('ffmpeg', [
+      '-y',
+      '-ss', String(trimStart),
+      '-i', segmentPaths[0],
+      '-t', String(CLIP_DURATION_SEC),
+      '-c', 'copy',
+      outputPath
+    ]);
+    return;
+  }
+
+  const workDir = path.dirname(outputPath);
+  const concatListPath = path.join(workDir, `concat_${uuidv4()}.txt`);
+  const mergedPath = path.join(workDir, `merged_${uuidv4()}.webm`);
+
+  const concatText = segmentPaths
+    .map((p) => `file '${p.replace(/'/g, "'\\''")}'`)
+    .join('\n');
+
+  await fsp.writeFile(concatListPath, concatText, 'utf8');
+
+  await execFileAsync('ffmpeg', [
+    '-y',
+    '-f', 'concat',
+    '-safe', '0',
+    '-i', concatListPath,
+    '-c', 'copy',
+    mergedPath
+  ]);
+
+  await execFileAsync('ffmpeg', [
+    '-y',
+    '-ss', String(trimStart),
+    '-i', mergedPath,
+    '-t', String(CLIP_DURATION_SEC),
+    '-c', 'copy',
+    outputPath
+  ]);
+
+  try { await fsp.unlink(concatListPath); } catch (_) {}
+  try { await fsp.unlink(mergedPath); } catch (_) {}
+}
+
+async function uploadProcessedClipToBase44({ goalId, filePath }) {
+  ensureBase44Env();
+
+  const form = new FormData();
+  const fileBuffer = await fsp.readFile(filePath);
+  const file = new File([fileBuffer], `goal_${goalId}.webm`, { type: 'video/webm' });
+
+  form.append('file', file);
+  form.append('goal_id', goalId);
+
+  const response = await fetch(
+    `https://api.base44.com/api/apps/${BASE44_APP_ID}/functions/uploadProcessedClip`,
+    {
+      method: 'POST',
+      headers: {
+        api_key: BASE44_API_KEY
+      },
+      body: form
+    }
+  );
+
+  const text = await response.text();
+
+  let data;
+  try {
+    data = text ? JSON.parse(text) : {};
+  } catch (e) {
+    throw new Error(`Invalid JSON from uploadProcessedClip: ${text}`);
+  }
+
+  if (!response.ok) {
+    throw new Error(`uploadProcessedClip failed: ${response.status} ${JSON.stringify(data)}`);
+  }
+
+  return data;
 }
 
 /* ───────────── app ───────────── */
-const app  = express();
+const app = express();
 const PORT = process.env.PORT || 3000;
 
 /* Multer – כותבים ל-/tmp/uploads */
@@ -48,14 +198,17 @@ const uploadDir = path.join(os.tmpdir(), 'uploads');
 fs.mkdirSync(uploadDir, { recursive: true });
 
 const upload = multer({
-  dest   : uploadDir,
-  limits : { fileSize: 50 * 1024 * 1024 }
+  dest: uploadDir,
+  limits: { fileSize: 50 * 1024 * 1024 }
 });
 
 app.use(cors());
 app.use(express.json());
 
-app.get('/health', (_,res)=>res.json({ ok:true }));
+app.get('/health', (_, res) => res.json({
+  ok: true,
+  buffer_window_seconds: BUFFER_WINDOW_SECONDS
+}));
 
 /* ───── upload-segment-buffer (NEW) ───── */
 app.post('/upload-segment-buffer', (req, res) => {
@@ -113,6 +266,99 @@ app.post('/upload-segment-buffer', (req, res) => {
       return res.status(500).json({ success: false, error: e.message });
     }
   });
+});
+
+/* ───── process-goal (NEW) ───── */
+app.post('/process-goal', async (req, res) => {
+  try {
+    const providedSecret = req.headers['x-api-key'] || '';
+    if (RENDER_INTERNAL_SECRET && providedSecret !== RENDER_INTERNAL_SECRET) {
+      return res.status(401).json({ success: false, error: 'Unauthorized' });
+    }
+
+    const { goal_id } = req.body || {};
+    if (!goal_id) {
+      return res.status(400).json({ success: false, error: 'goal_id is required' });
+    }
+
+    const fullData = await callBase44Function('getGoalFullData', { goal_id });
+    const goal = fullData.goal;
+    const game = fullData.game;
+    const teamSides = fullData.team_sides;
+
+    if (!goal || !game) {
+      return res.status(404).json({ success: false, error: 'Goal or Game not found' });
+    }
+
+    if (goal.video_clip_uri) {
+      return res.json({ success: true, skipped: true, reason: 'already_has_clip' });
+    }
+
+    const targetCamera = getTargetCamera(teamSides, goal.team);
+
+    const clipStart = Math.max(0, Number(goal.time || 0) - BACKWARD_OFFSET_SEC);
+    const clipEnd = clipStart + CLIP_DURATION_SEC;
+
+    const relevantSegments = await getSegmentsForClip({
+      matchId: goal.game_id,
+      cameraId: targetCamera,
+      clipStart,
+      clipEnd
+    });
+
+    if (!relevantSegments.length) {
+      return res.status(404).json({
+        success: false,
+        error: 'No buffered segments found for goal',
+        goal_id,
+        target_camera: targetCamera,
+        clip_start: clipStart,
+        clip_end: clipEnd
+      });
+    }
+
+    const tempWorkDir = path.join(os.tmpdir(), `goal-${goal_id}-${uuidv4()}`);
+    await ensureDir(tempWorkDir);
+
+    const outputPath = path.join(tempWorkDir, `goal_${goal_id}.webm`);
+    const trimStart = Math.max(0, clipStart - Number(relevantSegments[0].segment_start_time || 0));
+    const segmentPaths = relevantSegments.map((s) => s.path);
+
+    await concatAndTrimSegments({
+      segmentPaths,
+      trimStart,
+      outputPath
+    });
+
+    const uploadResult = await uploadProcessedClipToBase44({
+      goalId: goal_id,
+      filePath: outputPath
+    });
+
+    try {
+      await fsp.rm(tempWorkDir, { recursive: true, force: true });
+    } catch (_) {}
+
+    return res.json({
+      success: true,
+      goal_id,
+      target_camera: targetCamera,
+      clip_start: clipStart,
+      clip_end: clipEnd,
+      segments_used: relevantSegments.map((s) => ({
+        filename: s.filename,
+        segment_start_time: s.segment_start_time,
+        duration: s.duration
+      })),
+      upload_result: uploadResult
+    });
+  } catch (e) {
+    console.error('[PROCESS GOAL]', e);
+    return res.status(500).json({
+      success: false,
+      error: e.message
+    });
+  }
 });
 
 /* ───── upload-segment ───── */
