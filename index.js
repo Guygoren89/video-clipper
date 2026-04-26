@@ -91,13 +91,33 @@ async function callBase44Function(functionName, payload, extraHeaders = {}) {
   return data;
 }
 
-function getTargetCamera(teamSides, goalTeam) {
+function getTargetCamera(teamSides, goal, game) {
   if (!teamSides || !teamSides.left || !teamSides.right) {
     throw new Error('team_sides missing or incomplete');
   }
 
-  const scoringSide = teamSides.left === goalTeam ? 'left' : 'right';
-  return scoringSide === 'left' ? 'right' : 'left';
+  const scoringTeamColor = goal.team === 'team1' ? game.team1 : game.team2;
+
+  let scoringSide = null;
+  if (teamSides.left === scoringTeamColor) scoringSide = 'left';
+  if (teamSides.right === scoringTeamColor) scoringSide = 'right';
+
+  if (!scoringSide) {
+    throw new Error(`Could not determine scoring side. goal.team=${goal.team}, scoringTeamColor=${scoringTeamColor}, teamSides=${JSON.stringify(teamSides)}`);
+  }
+
+  const targetCamera = scoringSide === 'left' ? 'right' : 'left';
+
+  console.log('[CAMERA SELECT]', {
+    goal_id: goal.id,
+    goal_team: goal.team,
+    scoring_team_color: scoringTeamColor,
+    team_sides: teamSides,
+    scoring_side: scoringSide,
+    target_camera: targetCamera
+  });
+
+  return targetCamera;
 }
 
 async function ensureDir(dirPath) {
@@ -229,6 +249,14 @@ app.post('/upload-segment-buffer', (req, res) => {
         duration = 20
       } = req.body;
 
+      console.log('[SEGMENT UPLOAD RECEIVED]', {
+        match_id,
+        camera_id,
+        segment_start_time,
+        duration,
+        file_size: file?.size
+      });
+
       if (!file) {
         return res.status(400).json({ success: false, error: 'file is required' });
       }
@@ -255,6 +283,15 @@ app.post('/upload-segment-buffer', (req, res) => {
         Number(segment_start_time || 0)
       );
 
+      console.log('[SEGMENT BUFFERED]', {
+        match_id,
+        camera_id,
+        segment_start_time: saved.segment_start_time,
+        duration: saved.duration,
+        filename: saved.filename,
+        cleanup: pruneResult
+      });
+
       fs.unlink(file.path, () => {});
 
       return res.json({
@@ -279,6 +316,8 @@ app.post('/process-goal', async (req, res) => {
     }
 
     const { goal_id } = req.body || {};
+    console.log('[PROCESS GOAL START]', { goal_id });
+
     if (!goal_id) {
       return res.status(400).json({ success: false, error: 'goal_id is required' });
     }
@@ -288,15 +327,30 @@ app.post('/process-goal', async (req, res) => {
     const game = fullData.game;
     const teamSides = fullData.team_sides;
 
+    console.log('[GOAL DATA LOADED]', {
+      goal_id,
+      goal_team: goal?.team,
+      goal_time: goal?.time,
+      game_id: game?.id,
+      game_team1: game?.team1,
+      game_team2: game?.team2,
+      team_sides: teamSides
+    });
+
     if (!goal || !game) {
       return res.status(404).json({ success: false, error: 'Goal or Game not found' });
     }
 
     if (goal.video_clip_uri) {
+      console.log('[PROCESS GOAL SKIPPED]', {
+        goal_id,
+        reason: 'already_has_clip',
+        video_clip_uri: goal.video_clip_uri
+      });
       return res.json({ success: true, skipped: true, reason: 'already_has_clip' });
     }
 
-    const targetCamera = getTargetCamera(teamSides, goal.team);
+    const targetCamera = getTargetCamera(teamSides, goal, game);
 
     const clipStart = Math.max(0, Number(goal.time || 0) - BACKWARD_OFFSET_SEC);
     const clipEnd = clipStart + CLIP_DURATION_SEC;
@@ -306,6 +360,19 @@ app.post('/process-goal', async (req, res) => {
       cameraId: targetCamera,
       clipStart,
       clipEnd
+    });
+
+    console.log('[SEGMENTS FOUND]', {
+      goal_id,
+      target_camera: targetCamera,
+      clip_start: clipStart,
+      clip_end: clipEnd,
+      count: relevantSegments.length,
+      segments: relevantSegments.map(s => ({
+        filename: s.filename,
+        segment_start_time: s.segment_start_time,
+        duration: s.duration
+      }))
     });
 
     if (!relevantSegments.length) {
@@ -326,15 +393,34 @@ app.post('/process-goal', async (req, res) => {
     const trimStart = Math.max(0, clipStart - Number(relevantSegments[0].segment_start_time || 0));
     const segmentPaths = relevantSegments.map((s) => s.path);
 
+    console.log('[FFMPEG START]', {
+      goal_id,
+      target_camera: targetCamera,
+      trim_start: trimStart,
+      output_path: outputPath,
+      segment_paths: segmentPaths
+    });
+
     await concatAndTrimSegments({
       segmentPaths,
       trimStart,
       outputPath
     });
 
+    console.log('[FFMPEG DONE]', {
+      goal_id,
+      output_path: outputPath
+    });
+
     const uploadResult = await uploadProcessedClipToBase44({
       goalId: goal_id,
       filePath: outputPath
+    });
+
+    console.log('[PROCESS GOAL SUCCESS]', {
+      goal_id,
+      target_camera: targetCamera,
+      upload_result: uploadResult
     });
 
     try {
