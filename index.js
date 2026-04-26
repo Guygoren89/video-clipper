@@ -13,6 +13,11 @@ const {
   cutClipFromDriveFile
 } = require('./segmentsManager');
 
+const {
+  saveIncomingSegment,
+  pruneOldSegments
+} = require('./bufferManager');
+
 /* ─────────── Google Drive ─────────── */
 const auth = new google.auth.GoogleAuth({
   scopes: ['https://www.googleapis.com/auth/drive']
@@ -52,6 +57,64 @@ app.use(express.json());
 
 app.get('/health', (_,res)=>res.json({ ok:true }));
 
+/* ───── upload-segment-buffer (NEW) ───── */
+app.post('/upload-segment-buffer', (req, res) => {
+  upload.single('file')(req, res, async err => {
+    if (err) {
+      console.error('[MULTER BUFFER]', err);
+      return res.status(400).json({ success: false, error: err.message });
+    }
+
+    try {
+      const { file } = req;
+      const {
+        match_id,
+        camera_id,
+        segment_start_time = 0,
+        duration = 20
+      } = req.body;
+
+      if (!file) {
+        return res.status(400).json({ success: false, error: 'file is required' });
+      }
+
+      if (!match_id || !camera_id) {
+        return res.status(400).json({
+          success: false,
+          error: 'match_id and camera_id are required'
+        });
+      }
+
+      const saved = await saveIncomingSegment({
+        tempFilePath: file.path,
+        originalName: file.originalname || `segment_${Date.now()}.webm`,
+        matchId: match_id,
+        cameraId: camera_id,
+        segmentStartTime: Number(segment_start_time || 0),
+        duration: Number(duration || 20)
+      });
+
+      const pruneResult = await pruneOldSegments(
+        match_id,
+        camera_id,
+        Number(segment_start_time || 0)
+      );
+
+      fs.unlink(file.path, () => {});
+
+      return res.json({
+        success: true,
+        buffered: true,
+        segment: saved,
+        cleanup: pruneResult
+      });
+    } catch (e) {
+      console.error('[UPLOAD BUFFER]', e);
+      return res.status(500).json({ success: false, error: e.message });
+    }
+  });
+});
+
 /* ───── upload-segment ───── */
 app.post('/upload-segment', (req,res)=>{
   upload.single('file')(req,res,async err=>{
@@ -86,7 +149,7 @@ app.post('/upload-segment', (req,res)=>{
 /* ───── auto-generate-clips ───── */
 app.post('/auto-generate-clips', async (req,res)=>{
   const { match_id, actions=[], segments=[] } = req.body;
-  res.json({ success:true });                             // ack
+  res.json({ success:true });
 
   const segs=[...segments].sort(
     (a,b)=>Number(a.segment_start_time_in_game)-Number(b.segment_start_time_in_game)
