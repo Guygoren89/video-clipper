@@ -68,6 +68,7 @@ async function callBase44Function(functionName, payload, extraHeaders = {}) {
       headers: {
         api_key: BASE44_API_KEY,
         'Content-Type': 'application/json',
+        'x-api-key': RENDER_INTERNAL_SECRET,
         ...extraHeaders
       },
       body: JSON.stringify(payload || {})
@@ -167,7 +168,8 @@ async function uploadProcessedClipToBase44({ goalId, filePath }) {
     {
       method: 'POST',
       headers: {
-        api_key: BASE44_API_KEY
+        api_key: BASE44_API_KEY,
+        'x-api-key': RENDER_INTERNAL_SECRET
       },
       body: form
     }
