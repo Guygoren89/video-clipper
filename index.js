@@ -617,4 +617,4 @@ app.use((err,req,res,next)=>{
   res.status(err.status||500).json({ success:false, error:err.message||'server' });
 });
 
-app.listen(PORT, ()=>console.log(`📡 server on ${PORT}`));
+app.listen(PORT, '0.0.0.0', () => console.log(`📡 server on ${PORT}`));
