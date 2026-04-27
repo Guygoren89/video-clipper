@@ -43,6 +43,14 @@ const FULL_CLIPS_FOLDER_ID = '1vu6elArxj6YKLZePXjoqp_UFrDiI5ZOC';
 const BACKWARD_OFFSET_SEC = 13;
 const CLIP_DURATION_SEC = 12;
 
+/* ─────────── Retries ─────────── */
+const SEGMENT_COVERAGE_MAX_ATTEMPTS = 4;
+const SEGMENT_COVERAGE_RETRY_DELAY_MS = 7000;
+const SEGMENT_COVERAGE_TOLERANCE_SEC = 1.5;
+
+const UPLOAD_TO_BASE44_MAX_ATTEMPTS = 3;
+const UPLOAD_TO_BASE44_RETRY_DELAY_MS = 2500;
+
 /* helper */
 function toSeconds(v) {
   if (!v) return 0;
@@ -50,6 +58,10 @@ function toSeconds(v) {
   if (v.includes(':')) return v.split(':').map(Number).reduce((t, n) => t * 60 + n, 0);
   const n = Number(v);
   return Number.isNaN(n) ? 0 : n;
+}
+
+function sleep(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
 }
 
 function ensureBase44Env() {
@@ -124,6 +136,114 @@ async function ensureDir(dirPath) {
   await fsp.mkdir(dirPath, { recursive: true });
 }
 
+function getClipCoverageStatus({ segments, clipStart, clipEnd }) {
+  const sorted = [...segments].sort((a, b) => Number(a.segment_start_time) - Number(b.segment_start_time));
+
+  if (!sorted.length) {
+    return {
+      complete: false,
+      reason: 'no_segments',
+      coverage_end: null,
+      gap_at: clipStart
+    };
+  }
+
+  let coveredUntil = Number(clipStart);
+
+  for (const segment of sorted) {
+    const segmentStart = Number(segment.segment_start_time || 0);
+    const segmentDuration = Number(segment.duration || 0);
+    const segmentEnd = segmentStart + segmentDuration;
+
+    if (segmentEnd <= coveredUntil) {
+      continue;
+    }
+
+    if (segmentStart > coveredUntil + SEGMENT_COVERAGE_TOLERANCE_SEC) {
+      return {
+        complete: false,
+        reason: 'gap_before_segment',
+        coverage_end: coveredUntil,
+        gap_at: segmentStart
+      };
+    }
+
+    coveredUntil = Math.max(coveredUntil, segmentEnd);
+
+    if (coveredUntil + SEGMENT_COVERAGE_TOLERANCE_SEC >= clipEnd) {
+      return {
+        complete: true,
+        reason: 'covered',
+        coverage_end: coveredUntil,
+        gap_at: null
+      };
+    }
+  }
+
+  return {
+    complete: false,
+    reason: 'not_enough_coverage',
+    coverage_end: coveredUntil,
+    gap_at: clipEnd
+  };
+}
+
+async function getSegmentsForClipWithRetry({ matchId, cameraId, clipStart, clipEnd, goalId }) {
+  let lastSegments = [];
+  let lastCoverage = null;
+
+  for (let attempt = 1; attempt <= SEGMENT_COVERAGE_MAX_ATTEMPTS; attempt += 1) {
+    const segments = await getSegmentsForClip({
+      matchId,
+      cameraId,
+      clipStart,
+      clipEnd
+    });
+
+    const coverage = getClipCoverageStatus({
+      segments,
+      clipStart,
+      clipEnd
+    });
+
+    console.log('[SEGMENTS COVERAGE CHECK]', {
+      goal_id: goalId,
+      attempt,
+      target_camera: cameraId,
+      clip_start: clipStart,
+      clip_end: clipEnd,
+      count: segments.length,
+      complete: coverage.complete,
+      reason: coverage.reason,
+      coverage_end: coverage.coverage_end,
+      segments: segments.map(s => ({
+        filename: s.filename,
+        segment_start_time: s.segment_start_time,
+        duration: s.duration
+      }))
+    });
+
+    lastSegments = segments;
+    lastCoverage = coverage;
+
+    if (coverage.complete) {
+      return {
+        segments,
+        coverage
+      };
+    }
+
+    if (attempt < SEGMENT_COVERAGE_MAX_ATTEMPTS) {
+      await sleep(SEGMENT_COVERAGE_RETRY_DELAY_MS);
+    }
+  }
+
+  return {
+    segments: lastSegments,
+    coverage: lastCoverage
+  };
+}
+
 async function concatAndTrimSegments({ segmentPaths, trimStart, outputPath }) {
   if (!segmentPaths || segmentPaths.length === 0) {
     throw new Error('No segment paths provided');
@@ -176,39 +296,71 @@ async function concatAndTrimSegments({ segmentPaths, trimStart, outputPath }) {
 async function uploadProcessedClipToBase44({ goalId, filePath }) {
   ensureBase44Env();
 
-  const form = new FormData();
   const fileBuffer = await fsp.readFile(filePath);
-  const file = new File([fileBuffer], `goal_${goalId}.webm`, { type: 'video/webm' });
+  let lastError = null;
 
-  form.append('file', file);
-  form.append('goal_id', goalId);
+  for (let attempt = 1; attempt <= UPLOAD_TO_BASE44_MAX_ATTEMPTS; attempt += 1) {
+    try {
+      const form = new FormData();
+      const file = new File([fileBuffer], `goal_${goalId}.webm`, { type: 'video/webm' });
 
-  const response = await fetch(
-    `https://herut-football-6798c5e8.base44.app/api/apps/${BASE44_APP_ID}/functions/uploadProcessedClip`,
-    {
-      method: 'POST',
-      headers: {
-        api_key: BASE44_API_KEY,
-        'x-api-key': RENDER_INTERNAL_SECRET
-      },
-      body: form
+      form.append('file', file);
+      form.append('goal_id', goalId);
+
+      console.log('[UPLOAD TO BASE44 START]', {
+        goal_id: goalId,
+        attempt,
+        file_size: fileBuffer.length
+      });
+
+      const response = await fetch(
+        `https://herut-football-6798c5e8.base44.app/api/apps/${BASE44_APP_ID}/functions/uploadProcessedClip`,
+        {
+          method: 'POST',
+          headers: {
+            api_key: BASE44_API_KEY,
+            'x-api-key': RENDER_INTERNAL_SECRET
+          },
+          body: form
+        }
+      );
+
+      const text = await response.text();
+
+      let data;
+      try {
+        data = text ? JSON.parse(text) : {};
+      } catch (e) {
+        throw new Error(`Invalid JSON from uploadProcessedClip: ${text}`);
+      }
+
+      if (!response.ok) {
+        throw new Error(`uploadProcessedClip failed: ${response.status} ${JSON.stringify(data)}`);
+      }
+
+      console.log('[UPLOAD TO BASE44 SUCCESS]', {
+        goal_id: goalId,
+        attempt,
+        file_uri: data.file_uri
+      });
+
+      return data;
+    } catch (error) {
+      lastError = error;
+
+      console.error('[UPLOAD TO BASE44 ATTEMPT FAILED]', {
+        goal_id: goalId,
+        attempt,
+        error: error.message
+      });
+
+      if (attempt < UPLOAD_TO_BASE44_MAX_ATTEMPTS) {
+        await sleep(UPLOAD_TO_BASE44_RETRY_DELAY_MS);
+      }
     }
-  );
-
-  const text = await response.text();
-
-  let data;
-  try {
-    data = text ? JSON.parse(text) : {};
-  } catch (e) {
-    throw new Error(`Invalid JSON from uploadProcessedClip: ${text}`);
   }
 
-  if (!response.ok) {
-    throw new Error(`uploadProcessedClip failed: ${response.status} ${JSON.stringify(data)}`);
-  }
-
-  return data;
+  throw lastError || new Error('uploadProcessedClip failed after retries');
 }
 
 /* ───────────── app ───────────── */
@@ -355,12 +507,16 @@ app.post('/process-goal', async (req, res) => {
     const clipStart = Math.max(0, Number(goal.time || 0) - BACKWARD_OFFSET_SEC);
     const clipEnd = clipStart + CLIP_DURATION_SEC;
 
-    const relevantSegments = await getSegmentsForClip({
+    const segmentResult = await getSegmentsForClipWithRetry({
       matchId: goal.game_id,
       cameraId: targetCamera,
       clipStart,
-      clipEnd
+      clipEnd,
+      goalId: goal_id
     });
+
+    const relevantSegments = segmentResult.segments;
+    const coverage = segmentResult.coverage;
 
     console.log('[SEGMENTS FOUND]', {
       goal_id,
@@ -368,6 +524,9 @@ app.post('/process-goal', async (req, res) => {
       clip_start: clipStart,
       clip_end: clipEnd,
       count: relevantSegments.length,
+      coverage_complete: coverage?.complete,
+      coverage_reason: coverage?.reason,
+      coverage_end: coverage?.coverage_end,
       segments: relevantSegments.map(s => ({
         filename: s.filename,
         segment_start_time: s.segment_start_time,
@@ -383,6 +542,18 @@ app.post('/process-goal', async (req, res) => {
         target_camera: targetCamera,
         clip_start: clipStart,
         clip_end: clipEnd
+      });
+    }
+
+    if (!coverage || !coverage.complete) {
+      return res.status(404).json({
+        success: false,
+        error: 'Buffered segments do not fully cover clip window',
+        goal_id,
+        target_camera: targetCamera,
+        clip_start: clipStart,
+        clip_end: clipEnd,
+        coverage
       });
     }
 
@@ -433,6 +604,7 @@ app.post('/process-goal', async (req, res) => {
       target_camera: targetCamera,
       clip_start: clipStart,
       clip_end: clipEnd,
+      coverage,
       segments_used: relevantSegments.map((s) => ({
         filename: s.filename,
         segment_start_time: s.segment_start_time,
